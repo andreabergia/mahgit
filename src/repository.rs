@@ -30,23 +30,59 @@ pub struct Repository {
 
 impl Repository {
     pub fn discover<P: AsRef<Path>>(path: P) -> Result<Self, RepositoryError> {
-        let git_repo = Git2Repository::discover(path)
-            .map_err(|e| match e.code() {
-                git2::ErrorCode::NotFound => RepositoryError::NotFound,
-                _ => RepositoryError::Other(e.message().to_string()),
-            })?;
+        let git_repo = Git2Repository::discover(path).map_err(|e| match e.code() {
+            git2::ErrorCode::NotFound => RepositoryError::NotFound,
+            _ => RepositoryError::Other(e.message().to_string()),
+        })?;
 
         Ok(Repository { git_repo })
     }
 
     pub fn current_branch_name(&self) -> Result<String, RepositoryError> {
-        let head = self.git_repo.head()
+        let head = self
+            .git_repo
+            .head()
             .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
-        
+
         if let Some(name) = head.shorthand() {
             Ok(name.to_string())
         } else {
             Ok("HEAD".to_string())
         }
+    }
+
+    pub fn get_statuses(&self) -> Result<git2::Statuses<'_>, RepositoryError> {
+        self.git_repo
+            .statuses(None)
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_repository_error_display() {
+        assert_eq!(
+            RepositoryError::NotFound.to_string(),
+            "Not in a Git repository"
+        );
+        assert_eq!(
+            RepositoryError::NotARepository.to_string(),
+            "Not a Git repository"
+        );
+        assert_eq!(
+            RepositoryError::Corrupted("index".to_string()).to_string(),
+            "Repository corrupted: index"
+        );
+        assert_eq!(
+            RepositoryError::AccessDenied.to_string(),
+            "Access denied to repository"
+        );
+        assert_eq!(
+            RepositoryError::Other("custom error".to_string()).to_string(),
+            "Repository error: custom error"
+        );
     }
 }

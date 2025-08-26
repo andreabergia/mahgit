@@ -28,6 +28,10 @@ This is "mahgit", a Rust-based terminal Git interface that aims to replicate Mag
 
 Always run `cargo fmt` and `cargo clippy` before committing code.
 
+### Testing and Development
+- Use the `.tmp/` directory for temporary test files and repositories
+- Never use `/tmp` - always use the project's `.tmp/` directory for testing
+
 ## Architecture and Technology Stack
 
 **Core Dependencies (planned)**:

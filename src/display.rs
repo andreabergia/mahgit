@@ -2,7 +2,7 @@ use crate::status::RepositoryStatus;
 
 pub fn display_status(status: &RepositoryStatus) {
     println!("On branch {}", status.branch_name);
-    
+
     if status.is_clean() {
         println!("nothing to commit, working tree clean");
         return;
