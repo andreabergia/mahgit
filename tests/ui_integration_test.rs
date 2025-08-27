@@ -1,13 +1,38 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use mahgit::{status::RepositoryStatus, ui::App};
+use mahgit::{repository::Repository, status::RepositoryStatus, ui::App};
+use tempfile::TempDir;
+
+fn create_test_repository() -> (TempDir, Repository) {
+    let temp = TempDir::new().unwrap();
+    let repo_git2 = git2::Repository::init(&temp).unwrap();
+
+    // Create an initial commit to make it a valid repository
+    let sig =
+        git2::Signature::new("Test User", "test@example.com", &git2::Time::new(0, 0)).unwrap();
+    std::fs::write(temp.path().join("initial.txt"), "initial").unwrap();
+
+    let mut index = repo_git2.index().unwrap();
+    index.add_path(std::path::Path::new("initial.txt")).unwrap();
+    index.write().unwrap();
+
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo_git2.find_tree(tree_id).unwrap();
+    repo_git2
+        .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+        .unwrap();
+
+    let repo = Repository::discover(temp.path()).unwrap();
+    (temp, repo)
+}
 
 #[test]
 fn test_help_window_toggle() {
-    // Create a test repository status
+    // Create a test repository and status
+    let (_temp, repository) = create_test_repository();
     let status = RepositoryStatus::empty();
 
     // Create the app
-    let mut app = App::new(status);
+    let mut app = App::new(repository, status);
 
     // Initially help should not be showing
     assert!(
@@ -58,7 +83,8 @@ fn test_help_window_with_populated_status() {
     };
 
     // Create the app
-    let mut app = App::new(status);
+    let (_temp, repository) = create_test_repository();
+    let mut app = App::new(repository, status);
 
     // Initially help should not be showing
     assert!(
@@ -106,8 +132,9 @@ fn test_help_window_with_populated_status() {
 
 #[test]
 fn test_help_window_integration_with_different_keys() {
+    let (_temp, repository) = create_test_repository();
     let status = RepositoryStatus::empty();
-    let mut app = App::new(status);
+    let mut app = App::new(repository, status);
 
     // Test various key combinations that should NOT open help
     let test_keys = vec![

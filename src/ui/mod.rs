@@ -1,16 +1,20 @@
 pub mod console;
+pub mod feedback;
 pub mod input;
 pub mod navigation;
 pub mod status_view;
 
+use crate::operations::StagingOperations;
+use crate::repository::Repository;
 use crate::status::RepositoryStatus;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use feedback::FeedbackManager;
 use input::{Command, InputHandler};
-use navigation::NavigationState;
+use navigation::{NavigationState, OperationContext};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use status_view::StatusView;
 use std::io::{Stdout, stdout};
@@ -19,9 +23,11 @@ pub struct App {
     should_quit: bool,
     #[allow(dead_code)]
     current_view: ViewType,
+    repository: Repository,
     status: RepositoryStatus,
     navigation: NavigationState,
     input_handler: InputHandler,
+    feedback_manager: FeedbackManager,
     show_help: bool,
 }
 
@@ -31,14 +37,16 @@ pub enum ViewType {
 }
 
 impl App {
-    pub fn new(status: RepositoryStatus) -> Self {
+    pub fn new(repository: Repository, status: RepositoryStatus) -> Self {
         let navigation = NavigationState::new(&status);
         Self {
             should_quit: false,
             current_view: ViewType::Status,
+            repository,
             status,
             navigation,
             input_handler: InputHandler::new(),
+            feedback_manager: FeedbackManager::new(),
             show_help: false,
         }
     }
@@ -112,22 +120,22 @@ impl App {
                 self.should_quit = true;
             }
             Command::RefreshStatus => {
-                // TODO: Implement status refresh
+                self.refresh_status();
             }
             Command::ShowHelp => {
                 self.show_help = !self.show_help;
             }
             Command::StageFile => {
-                // TODO: Implement file staging
+                self.stage_selected_file();
             }
             Command::UnstageFile => {
-                // TODO: Implement file unstaging
+                self.unstage_selected_file();
             }
             Command::AddUntracked => {
-                // TODO: Implement adding untracked files
+                self.add_selected_file();
             }
             Command::ToggleStage => {
-                // TODO: Implement toggle staging
+                self.toggle_stage_selected_file();
             }
             Command::Unknown => {
                 // Ignore unknown commands
@@ -135,13 +143,132 @@ impl App {
         }
     }
 
+    fn refresh_status(&mut self) {
+        if let Err(err) = self.status.reload(&self.repository) {
+            self.feedback_manager
+                .show_result(crate::operations::OperationResult::new(format!(
+                    "Failed to refresh status: {}",
+                    err
+                )));
+        } else {
+            self.navigation.update_status(&self.status);
+            self.feedback_manager
+                .show_result(crate::operations::OperationResult::new(
+                    "Status refreshed".to_string(),
+                ));
+        }
+    }
+
+    fn execute_staging_operation<F>(&mut self, operation: F, operation_name: &str)
+    where
+        F: FnOnce(
+            &StagingOperations,
+            &str,
+        )
+            -> Result<crate::operations::OperationResult, crate::repository::RepositoryError>,
+    {
+        if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+            let staging_ops = StagingOperations::new(&self.repository);
+            match operation(&staging_ops, &selected_file.path) {
+                Ok(result) => {
+                    self.feedback_manager.show_result(result);
+                    self.refresh_status_after_operation();
+                }
+                Err(err) => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(format!(
+                            "Failed to {} {}: {}",
+                            operation_name, selected_file.path, err
+                        )));
+                }
+            }
+        }
+    }
+
+    fn stage_selected_file(&mut self) {
+        self.execute_staging_operation(|ops, path| ops.stage_file(path), "stage");
+    }
+
+    fn unstage_selected_file(&mut self) {
+        self.execute_staging_operation(|ops, path| ops.unstage_file(path), "unstage");
+    }
+
+    fn add_selected_file(&mut self) {
+        self.execute_staging_operation(|ops, path| ops.add_untracked_file(path), "add");
+    }
+
+    fn toggle_stage_selected_file(&mut self) {
+        let operation_context = self.navigation.get_operation_context();
+        match operation_context {
+            OperationContext::CanStage => self.stage_selected_file(),
+            OperationContext::CanUnstage => self.unstage_selected_file(),
+            OperationContext::CanAdd => self.add_selected_file(),
+            OperationContext::ReadOnly => {
+                self.feedback_manager
+                    .show_result(crate::operations::OperationResult::new(
+                        "Cannot modify conflicted files".to_string(),
+                    ));
+            }
+        }
+    }
+
+    fn refresh_status_after_operation(&mut self) {
+        if self.status.reload(&self.repository).is_err() {
+            // If reload fails, we still want to continue, just won't have updated status
+        } else {
+            self.navigation.update_status(&self.status);
+        }
+    }
+
     fn render(&self, f: &mut ratatui::Frame) {
         let status_view = StatusView::new(&self.status, &self.navigation);
         status_view.render(f, f.area());
 
+        // Render feedback message if there is one
+        if let Some(feedback) = self.feedback_manager.get_current_message() {
+            self.render_feedback_message(f, feedback);
+        }
+
         if self.show_help {
             self.render_help_overlay(f);
         }
+    }
+
+    fn render_feedback_message(
+        &self,
+        f: &mut ratatui::Frame,
+        feedback: &crate::operations::OperationResult,
+    ) {
+        use ratatui::{
+            layout::{Alignment, Rect},
+            style::{Color, Style},
+            widgets::{Block, Borders, Clear, Paragraph},
+        };
+
+        let area = f.area();
+
+        // Create a small area at the bottom for the feedback
+        let feedback_area = Rect {
+            x: 0,
+            y: area.height.saturating_sub(3),
+            width: area.width,
+            height: 3,
+        };
+
+        // Clear the area
+        f.render_widget(Clear, feedback_area);
+
+        // Create the feedback message
+        let block = Block::default()
+            .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+            .style(Style::default().bg(Color::DarkGray));
+
+        let paragraph = Paragraph::new(feedback.message.as_str())
+            .block(block)
+            .alignment(Alignment::Left)
+            .style(Style::default().fg(Color::White));
+
+        f.render_widget(paragraph, feedback_area);
     }
 
     fn render_help_overlay(&self, f: &mut ratatui::Frame) {

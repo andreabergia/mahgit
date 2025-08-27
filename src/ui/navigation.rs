@@ -1,5 +1,27 @@
 use crate::status::RepositoryStatus;
 
+#[derive(Debug, Clone)]
+pub struct SelectedFile {
+    pub path: String,
+    pub context: FileContext,
+}
+
+#[derive(Debug, Clone)]
+pub enum FileContext {
+    Staged,
+    Unstaged,
+    Untracked,
+    Conflicted,
+}
+
+#[derive(Debug, Clone)]
+pub enum OperationContext {
+    CanStage,
+    CanUnstage,
+    CanAdd,
+    ReadOnly,
+}
+
 pub struct NavigationState {
     current_section: StatusSection,
     selected_index: usize,
@@ -107,6 +129,65 @@ impl NavigationState {
 
     pub fn has_selections(&self) -> bool {
         !self.sections.is_empty() && self.sections.iter().any(|s| s.file_count > 0)
+    }
+
+    pub fn get_selected_file(&self, status: &RepositoryStatus) -> Option<SelectedFile> {
+        if !self.has_selections() {
+            return None;
+        }
+
+        let path = match self.current_section {
+            StatusSection::Staged => {
+                let files = status.staged_files();
+                if self.selected_index < files.len() {
+                    files[self.selected_index].path.clone()
+                } else {
+                    return None;
+                }
+            }
+            StatusSection::Unstaged => {
+                let files = status.unstaged_files();
+                if self.selected_index < files.len() {
+                    files[self.selected_index].path.clone()
+                } else {
+                    return None;
+                }
+            }
+            StatusSection::Untracked => {
+                let files = status.untracked_files();
+                if self.selected_index < files.len() {
+                    files[self.selected_index].clone()
+                } else {
+                    return None;
+                }
+            }
+            StatusSection::Conflicted => {
+                let files = status.conflicted_files();
+                if self.selected_index < files.len() {
+                    files[self.selected_index].clone()
+                } else {
+                    return None;
+                }
+            }
+        };
+
+        let context = match self.current_section {
+            StatusSection::Staged => FileContext::Staged,
+            StatusSection::Unstaged => FileContext::Unstaged,
+            StatusSection::Untracked => FileContext::Untracked,
+            StatusSection::Conflicted => FileContext::Conflicted,
+        };
+
+        Some(SelectedFile { path, context })
+    }
+
+    pub fn get_operation_context(&self) -> OperationContext {
+        match self.current_section {
+            StatusSection::Staged => OperationContext::CanUnstage,
+            StatusSection::Unstaged => OperationContext::CanStage,
+            StatusSection::Untracked => OperationContext::CanAdd,
+            StatusSection::Conflicted => OperationContext::ReadOnly,
+        }
     }
 
     fn build_sections(status: &RepositoryStatus) -> Vec<SectionInfo> {
@@ -493,6 +574,87 @@ mod tests {
         assert!(nav.has_selections());
         // We don't assert the specific section since the closest position algorithm
         // may place us in any valid section when the original position is no longer available
+    }
+
+    #[test]
+    fn test_get_selected_file() {
+        let status = create_test_status_with_files();
+        let mut nav = NavigationState::new(&status);
+
+        // Test selecting files from different sections
+        let selected = nav.get_selected_file(&status).unwrap();
+        assert_eq!(selected.path, "staged1.txt");
+        assert!(matches!(selected.context, FileContext::Staged));
+
+        // Move to staged[1]
+        nav.move_down();
+        let selected = nav.get_selected_file(&status).unwrap();
+        assert_eq!(selected.path, "staged2.txt");
+        assert!(matches!(selected.context, FileContext::Staged));
+
+        // Move to unstaged[0]
+        nav.move_down();
+        let selected = nav.get_selected_file(&status).unwrap();
+        assert_eq!(selected.path, "unstaged1.txt");
+        assert!(matches!(selected.context, FileContext::Unstaged));
+
+        // Move to untracked[0]
+        nav.move_down();
+        nav.move_down();
+        nav.move_down();
+        let selected = nav.get_selected_file(&status).unwrap();
+        assert_eq!(selected.path, "untracked1.txt");
+        assert!(matches!(selected.context, FileContext::Untracked));
+
+        // Move to conflicted[0]
+        nav.move_down();
+        let selected = nav.get_selected_file(&status).unwrap();
+        assert_eq!(selected.path, "conflicted1.txt");
+        assert!(matches!(selected.context, FileContext::Conflicted));
+    }
+
+    #[test]
+    fn test_get_selected_file_empty_status() {
+        let status = RepositoryStatus::empty();
+        let nav = NavigationState::new(&status);
+
+        assert!(nav.get_selected_file(&status).is_none());
+    }
+
+    #[test]
+    fn test_get_operation_context() {
+        let status = create_test_status_with_files();
+        let mut nav = NavigationState::new(&status);
+
+        // Staged section -> can unstage
+        assert!(matches!(
+            nav.get_operation_context(),
+            OperationContext::CanUnstage
+        ));
+
+        // Move to unstaged section -> can stage
+        nav.move_down();
+        nav.move_down();
+        assert!(matches!(
+            nav.get_operation_context(),
+            OperationContext::CanStage
+        ));
+
+        // Move to untracked section -> can add
+        nav.move_down();
+        nav.move_down();
+        nav.move_down();
+        assert!(matches!(
+            nav.get_operation_context(),
+            OperationContext::CanAdd
+        ));
+
+        // Move to conflicted section -> read only
+        nav.move_down();
+        assert!(matches!(
+            nav.get_operation_context(),
+            OperationContext::ReadOnly
+        ));
     }
 
     #[test]

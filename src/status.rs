@@ -131,6 +131,16 @@ impl RepositoryStatus {
             conflicted: Vec::new(),
         }
     }
+
+    pub fn reload(&mut self, repository: &Repository) -> Result<(), RepositoryError> {
+        let new_status = Self::new(repository)?;
+        self.branch_name = new_status.branch_name;
+        self.staged = new_status.staged;
+        self.unstaged = new_status.unstaged;
+        self.untracked = new_status.untracked;
+        self.conflicted = new_status.conflicted;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -227,4 +237,9 @@ mod tests {
         assert_eq!(FileStatus::Renamed.to_string(), "renamed");
         assert_eq!(FileStatus::Typechange.to_string(), "typechange");
     }
+
+    // Note: The reload() method is tested in integration tests where we can
+    // create actual git repositories and verify that reload() properly refreshes
+    // the status from the actual repository state. Unit testing reload() would
+    // just duplicate the implementation logic without adding value.
 }

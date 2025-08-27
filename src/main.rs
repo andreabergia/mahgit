@@ -1,3 +1,4 @@
+pub mod operations;
 pub mod repository;
 pub mod status;
 pub mod ui;
@@ -29,7 +30,7 @@ fn run() -> Result<(), RepositoryError> {
     if use_console {
         console::display_status(&status);
     } else {
-        let mut app = App::new(status);
+        let mut app = App::new(repo, status);
         if let Err(e) = app.run() {
             eprintln!("UI Error: {}", e);
             process::exit(1);
