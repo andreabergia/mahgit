@@ -55,6 +55,17 @@ impl App {
         self.show_help
     }
 
+    pub fn should_quit(&self) -> bool {
+        self.should_quit
+    }
+
+    /// Force refresh the repository status (for testing purposes)
+    pub fn force_refresh(&mut self) -> Result<(), crate::repository::RepositoryError> {
+        self.status.reload(&self.repository)?;
+        self.navigation.update_status(&self.status);
+        Ok(())
+    }
+
     pub fn process_key_event(&mut self, key_event: crossterm::event::KeyEvent) {
         let command = self.input_handler.handle_key(key_event);
         self.handle_command(command);
@@ -220,7 +231,7 @@ impl App {
         }
     }
 
-    fn render(&self, f: &mut ratatui::Frame) {
+    pub fn render(&self, f: &mut ratatui::Frame) {
         let status_view = StatusView::new(&self.status, &self.navigation);
         status_view.render(f, f.area());
 
