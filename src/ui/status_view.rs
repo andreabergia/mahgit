@@ -2,7 +2,7 @@ use crate::status::RepositoryStatus;
 use crate::ui::navigation::{NavigationState, StatusSection};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph},
@@ -41,12 +41,18 @@ impl<'a> StatusView<'a> {
         let inner_area = block.inner(chunks[0]);
         f.render_widget(block, chunks[0]);
 
+        // Add margin around the content (1 row/column on all sides)
+        let content_area = inner_area.inner(Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+
         if self.status.is_clean() {
             let clean_text = Text::from("Working directory is clean");
             let paragraph = Paragraph::new(clean_text);
-            f.render_widget(paragraph, inner_area);
+            f.render_widget(paragraph, content_area);
         } else {
-            self.render_file_sections(f, inner_area);
+            self.render_file_sections(f, content_area);
         }
     }
 
