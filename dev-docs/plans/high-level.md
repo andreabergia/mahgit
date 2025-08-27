@@ -61,21 +61,21 @@ Build a terminal-based Git interface that replicates Magit's primary workflows: 
 - Sections are clearly distinguishable
 - Interface remains usable on small terminals (80x24 minimum)
 
-## Phase 3: File Operations
-**Goal**: Enable basic Git operations directly from the status interface
+## Phase 3: Individual File Operations
+**Goal**: Enable individual Git operations directly from the status interface
 
 **Key Problems to Solve**:
 - Stage and unstage individual files safely
-- Handle bulk operations (stage all, unstage all)
+- Add untracked files to staging area
 - Provide immediate feedback for operations
 - Handle edge cases (binary files, large files, permission issues)
-- Manage concurrent Git operations and state consistency
+- Manage Git operations and state consistency
 
 **Success Criteria**:
-- Single-key staging/unstaging of files
-- Bulk operations work reliably
+- Single-key staging/unstaging of individual files
 - Operations reflect immediately in the interface
 - Error states are communicated clearly to user
+- Context-aware operations based on file status
 
 ## Phase 4: Diff Viewer Foundation
 **Goal**: Display file differences in a readable, navigable format
@@ -92,6 +92,22 @@ Build a terminal-based Git interface that replicates Magit's primary workflows: 
 - Scroll through large diffs smoothly
 - Clear indication of added/removed/modified lines
 - Return to status view seamlessly
+
+## Phase 4.5: Bulk Operations
+**Goal**: Enable bulk Git operations for efficient repository management
+
+**Key Problems to Solve**:
+- Stage all unstaged files with single command
+- Unstage all staged files with single command
+- Handle mixed operations (stage some, unstage others)
+- Provide progress feedback for multi-file operations
+- Handle failures in bulk operations gracefully
+
+**Success Criteria**:
+- Bulk operations work reliably across file types
+- Clear progress indication for large operations
+- Partial failure handling with detailed feedback
+- Integration with individual file operations
 
 ## Phase 5: Advanced Diff Features
 **Goal**: Add interactive diff manipulation matching Magit's capabilities
