@@ -56,6 +56,53 @@ impl Repository {
             .statuses(None)
             .map_err(|e| RepositoryError::Other(e.message().to_string()))
     }
+
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, RepositoryError> {
+        let git_repo = Git2Repository::open(path).map_err(|e| match e.code() {
+            git2::ErrorCode::NotFound => RepositoryError::NotFound,
+            _ => RepositoryError::Other(e.message().to_string()),
+        })?;
+
+        Ok(Repository { git_repo })
+    }
+
+    pub fn get_index(&self) -> Result<git2::Index, RepositoryError> {
+        self.git_repo
+            .index()
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))
+    }
+
+    pub fn add_to_index(&self, path: &str) -> Result<(), RepositoryError> {
+        let mut index = self.get_index()?;
+        index
+            .add_path(std::path::Path::new(path))
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+        index
+            .write()
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+        Ok(())
+    }
+
+    pub fn reset_file(&self, path: &str) -> Result<(), RepositoryError> {
+        let head_commit = self
+            .git_repo
+            .head()
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?
+            .peel_to_commit()
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        let head_tree = head_commit
+            .tree()
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        let head_object = head_tree.as_object();
+
+        self.git_repo
+            .reset_default(Some(head_object), [path])
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
