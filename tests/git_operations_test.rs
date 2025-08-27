@@ -1,5 +1,5 @@
 use mahgit::repository::{Repository, RepositoryError};
-use mahgit::status::RepositoryStatus;
+use mahgit::status::{FileStatus, RepositoryStatus};
 use std::fs;
 use tempfile::TempDir;
 
@@ -79,7 +79,12 @@ fn test_unstaged_changes_status() {
 
     assert!(!status.is_clean());
     assert_eq!(status.unstaged.len(), 1);
-    assert!(status.unstaged.contains(&"file1.txt".to_string()));
+    assert!(
+        status
+            .unstaged
+            .iter()
+            .any(|entry| entry.path == "file1.txt" && entry.status == FileStatus::Modified)
+    );
     assert!(status.staged.is_empty());
     assert!(status.untracked.is_empty());
     assert!(status.conflicted.is_empty());
@@ -101,7 +106,12 @@ fn test_staged_changes_status() {
 
     assert!(!status.is_clean());
     assert_eq!(status.staged.len(), 1);
-    assert!(status.staged.contains(&"file2.txt".to_string()));
+    assert!(
+        status
+            .staged
+            .iter()
+            .any(|entry| entry.path == "file2.txt" && entry.status == FileStatus::Added)
+    );
     assert!(status.unstaged.is_empty());
     assert!(status.untracked.is_empty());
     assert!(status.conflicted.is_empty());

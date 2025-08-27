@@ -1,4 +1,4 @@
-use crate::status::RepositoryStatus;
+use crate::status::{FileEntry, RepositoryStatus};
 use crate::ui::navigation::{NavigationState, StatusSection};
 use ratatui::{
     Frame,
@@ -60,7 +60,7 @@ impl<'a> StatusView<'a> {
         let mut items = Vec::new();
         let mut current_file_index = 0;
 
-        self.add_section_items(
+        self.add_section_items_with_entries(
             &mut items,
             &mut current_file_index,
             StatusSection::Staged,
@@ -68,7 +68,7 @@ impl<'a> StatusView<'a> {
             self.status.staged_files(),
         );
 
-        self.add_section_items(
+        self.add_section_items_with_entries(
             &mut items,
             &mut current_file_index,
             StatusSection::Unstaged,
@@ -94,6 +94,58 @@ impl<'a> StatusView<'a> {
 
         let list = List::new(items);
         f.render_widget(list, area);
+    }
+
+    fn add_section_items_with_entries(
+        &self,
+        items: &mut Vec<ListItem>,
+        current_file_index: &mut usize,
+        section: StatusSection,
+        header: &str,
+        entries: &[FileEntry],
+    ) {
+        if entries.is_empty() {
+            return;
+        }
+
+        let section_header = format!("{} ({})", header, entries.len());
+        let header_style = Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
+
+        items.push(ListItem::new(Line::from(Span::styled(
+            section_header,
+            header_style,
+        ))));
+
+        for (file_index, entry) in entries.iter().enumerate() {
+            let content = format!("  {} {}", entry.status, entry.path);
+
+            let is_selected = self.navigation.current_section() == section
+                && self.navigation.selected_index() == file_index;
+
+            let style = if is_selected {
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                self.get_file_style(section)
+            };
+
+            let mut spans = vec![Span::styled(content, style)];
+
+            if is_selected {
+                spans.insert(0, Span::styled("> ", Style::default().fg(Color::Yellow)));
+            } else {
+                spans.insert(0, Span::raw("  "));
+            }
+
+            items.push(ListItem::new(Line::from(spans)));
+            *current_file_index += 1;
+        }
+
+        items.push(ListItem::new(Line::from("")));
     }
 
     fn add_section_items(
@@ -151,8 +203,8 @@ impl<'a> StatusView<'a> {
 
     fn get_file_indicator(&self, section: StatusSection) -> &'static str {
         match section {
-            StatusSection::Staged => "staged",
-            StatusSection::Unstaged => "modified",
+            StatusSection::Staged => "staged", // This shouldn't be used anymore for staged files
+            StatusSection::Unstaged => "modified", // This shouldn't be used anymore for unstaged files
             StatusSection::Untracked => "new",
             StatusSection::Conflicted => "conflict",
         }

@@ -11,16 +11,16 @@ pub fn display_status(status: &RepositoryStatus) {
     if !status.staged.is_empty() {
         println!("\nChanges to be committed:");
         println!("  (use \"git reset HEAD <file>...\" to unstage)");
-        for file in &status.staged {
-            println!("\t{}", file);
+        for entry in &status.staged {
+            println!("\t{:<12} {}", entry.status, entry.path);
         }
     }
 
     if !status.unstaged.is_empty() {
         println!("\nChanges not staged for commit:");
         println!("  (use \"git add <file>...\" to update what will be committed)");
-        for file in &status.unstaged {
-            println!("\t{}", file);
+        for entry in &status.unstaged {
+            println!("\t{:<12} {}", entry.status, entry.path);
         }
     }
 

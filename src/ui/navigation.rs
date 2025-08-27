@@ -223,15 +223,23 @@ impl NavigationState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::status::{FileEntry, FileStatus};
+
+    fn create_file_entry(path: &str, status: FileStatus) -> FileEntry {
+        FileEntry::new(path.to_string(), status)
+    }
 
     fn create_test_status_with_files() -> RepositoryStatus {
         RepositoryStatus {
             branch_name: "main".to_string(),
-            staged: vec!["staged1.txt".to_string(), "staged2.txt".to_string()],
+            staged: vec![
+                create_file_entry("staged1.txt", FileStatus::Added),
+                create_file_entry("staged2.txt", FileStatus::Modified),
+            ],
             unstaged: vec![
-                "unstaged1.txt".to_string(),
-                "unstaged2.txt".to_string(),
-                "unstaged3.txt".to_string(),
+                create_file_entry("unstaged1.txt", FileStatus::Modified),
+                create_file_entry("unstaged2.txt", FileStatus::Deleted),
+                create_file_entry("unstaged3.txt", FileStatus::Modified),
             ],
             untracked: vec!["untracked1.txt".to_string()],
             conflicted: vec!["conflicted1.txt".to_string(), "conflicted2.txt".to_string()],
@@ -242,7 +250,10 @@ mod tests {
         RepositoryStatus {
             branch_name: "main".to_string(),
             staged: vec![],
-            unstaged: vec!["file1.txt".to_string(), "file2.txt".to_string()],
+            unstaged: vec![
+                create_file_entry("file1.txt", FileStatus::Modified),
+                create_file_entry("file2.txt", FileStatus::Modified),
+            ],
             untracked: vec![],
             conflicted: vec![],
         }
@@ -351,7 +362,7 @@ mod tests {
     fn test_navigation_skip_empty_sections() {
         let status = RepositoryStatus {
             branch_name: "main".to_string(),
-            staged: vec!["staged1.txt".to_string()],
+            staged: vec![create_file_entry("staged1.txt", FileStatus::Added)],
             unstaged: vec![], // Empty section
             untracked: vec!["untracked1.txt".to_string()],
             conflicted: vec![],
@@ -466,8 +477,11 @@ mod tests {
         // Create new status with fewer unstaged files
         let updated_status = RepositoryStatus {
             branch_name: "main".to_string(),
-            staged: vec!["staged1.txt".to_string(), "staged2.txt".to_string()],
-            unstaged: vec!["unstaged1.txt".to_string()], // Only one file now
+            staged: vec![
+                create_file_entry("staged1.txt", FileStatus::Added),
+                create_file_entry("staged2.txt", FileStatus::Modified),
+            ],
+            unstaged: vec![create_file_entry("unstaged1.txt", FileStatus::Modified)], // Only one file now
             untracked: vec!["untracked1.txt".to_string()],
             conflicted: vec!["conflicted1.txt".to_string(), "conflicted2.txt".to_string()],
         };
@@ -495,8 +509,11 @@ mod tests {
         // Create new status that still has unstaged files, but fewer
         let updated_status = RepositoryStatus {
             branch_name: "main".to_string(),
-            staged: vec!["staged1.txt".to_string(), "staged2.txt".to_string()],
-            unstaged: vec!["unstaged1.txt".to_string()], // Same first file
+            staged: vec![
+                create_file_entry("staged1.txt", FileStatus::Added),
+                create_file_entry("staged2.txt", FileStatus::Modified),
+            ],
+            unstaged: vec![create_file_entry("unstaged1.txt", FileStatus::Modified)], // Same first file
             untracked: vec!["untracked1.txt".to_string()],
             conflicted: vec!["conflicted1.txt".to_string(), "conflicted2.txt".to_string()],
         };

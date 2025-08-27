@@ -19,9 +19,13 @@ Transform the current console-based status display into an interactive terminal 
 - ✅ Integrated main application with UI event loop (`src/main.rs`)
 
 **Recent Improvements (Latest Commits):**
-- ✅ Generic two-key sequence handling system (commit: d30a4d9)
-- ✅ Code quality improvements - resolved all clippy warnings (commit: bababc9)
+- ✅ Generic two-key sequence handling system
+- ✅ Code quality improvements - resolved all clippy warnings
 - ✅ Comprehensive test coverage for input handling and navigation
+- ✅ Magit-style operation indicators - shows "added", "modified", "deleted", "renamed", "typechange" instead of generic "staged" labels
+- ✅ Consistent Display trait implementation for FileStatus with clean, colon-free formatting
+- ✅ Enhanced status parsing to properly categorize Git operations (INDEX_NEW → Added, INDEX_MODIFIED → Modified, etc.)
+- ✅ Removed code duplication and unnecessary wrapper methods for cleaner architecture
 
 ## Implementation Tasks
 
@@ -109,8 +113,8 @@ pub enum StatusSection {
 ╭─ Repository: mahgit (branch: main) ─╮
 │                                     │
 │ Staged changes (2)                  │
-│ > staged   src/main.rs              │
-│   staged   src/ui/mod.rs            │
+│ > added    src/main.rs              │
+│   modified src/ui/mod.rs            │
 │                                     │
 │ Unstaged changes (1)                │
 │   modified README.md                │
@@ -122,10 +126,11 @@ pub enum StatusSection {
 
 **✅ Implemented Visual Design Elements:**
 - ✅ Section headers with file counts in cyan/bold styling
-- ✅ Indented file listings with semantic status indicators
+- ✅ Indented file listings with precise Git operation indicators ("added", "modified", "deleted", "renamed", "typechange")
 - ✅ Current selection highlight with yellow arrow (>) and gray background
 - ✅ Consistent spacing and alignment throughout
 - ✅ Color-coded file status (green=staged, red=unstaged, magenta=untracked, yellow=conflicted)
+- ✅ Magit-style operation labeling instead of generic "staged" prefixes
 
 **✅ Success Criteria Met:**
 - ✅ Clear visual hierarchy between sections
@@ -241,7 +246,7 @@ src/
 ├── main.rs                 ✅ (updated: UI launch)
 ├── lib.rs                  ✅ (updated: expose UI modules)  
 ├── repository.rs           ✅ (unchanged from Phase 1)
-├── status.rs              ✅ (unchanged from Phase 1)
+├── status.rs              ✅ FileEntry structure with Git operation types
 └── ui/
     ├── mod.rs             ✅ (implemented: UI foundation & App struct)
     ├── navigation.rs      ✅ (implemented: selection state & navigation logic)
