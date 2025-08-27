@@ -68,10 +68,11 @@ impl App {
             terminal.draw(|f| self.render(f))?;
 
             if event::poll(std::time::Duration::from_millis(16))?
-                && let Event::Key(key) = event::read()? {
-                    let command = self.input_handler.handle_key(key);
-                    self.handle_command(command);
-                }
+                && let Event::Key(key) = event::read()?
+            {
+                let command = self.input_handler.handle_key(key);
+                self.handle_command(command);
+            }
 
             if self.should_quit {
                 break;

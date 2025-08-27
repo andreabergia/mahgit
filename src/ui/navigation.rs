@@ -79,10 +79,11 @@ impl NavigationState {
 
     pub fn move_to_bottom(&mut self) {
         if let Some(last_section) = self.sections.last()
-            && last_section.file_count > 0 {
-                self.current_section = last_section.section_type;
-                self.selected_index = last_section.file_count - 1;
-            }
+            && last_section.file_count > 0
+        {
+            self.current_section = last_section.section_type;
+            self.selected_index = last_section.file_count - 1;
+        }
     }
 
     pub fn current_section(&self) -> StatusSection {
@@ -201,19 +202,21 @@ impl NavigationState {
         }
 
         if let Some(last_section) = self.sections.last()
-            && last_section.file_count > 0 {
-                return Some((last_section.section_type, last_section.file_count - 1));
-            }
+            && last_section.file_count > 0
+        {
+            return Some((last_section.section_type, last_section.file_count - 1));
+        }
 
         None
     }
 
     fn reset_to_first_available(&mut self) {
         if let Some(first_section) = self.sections.first()
-            && first_section.file_count > 0 {
-                self.current_section = first_section.section_type;
-                self.selected_index = 0;
-            }
+            && first_section.file_count > 0
+        {
+            self.current_section = first_section.section_type;
+            self.selected_index = 0;
+        }
     }
 }
 

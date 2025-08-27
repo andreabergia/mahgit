@@ -22,30 +22,24 @@ pub enum Command {
 }
 
 #[derive(Debug)]
-struct KeySequenceState {
-    first_g_time: Option<Instant>,
+struct PreviousKey {
+    character: char,
+    timestamp: Instant,
 }
 
 pub struct InputHandler {
-    sequence_state: KeySequenceState,
+    previous_key: Option<PreviousKey>,
 }
 
 impl InputHandler {
     pub fn new() -> Self {
-        Self {
-            sequence_state: KeySequenceState { first_g_time: None },
-        }
+        Self { previous_key: None }
     }
 
     pub fn handle_key(&mut self, key_event: KeyEvent) -> Command {
         match key_event {
-            // Navigation keys
+            // Arrow keys and special keys
             KeyEvent {
-                code: KeyCode::Char('j'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            }
-            | KeyEvent {
                 code: KeyCode::Down,
                 ..
             } => {
@@ -54,18 +48,12 @@ impl InputHandler {
             }
 
             KeyEvent {
-                code: KeyCode::Char('k'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            }
-            | KeyEvent {
                 code: KeyCode::Up, ..
             } => {
                 self.clear_sequence_state();
                 Command::MoveUp
             }
 
-            // Jump to top - Home key
             KeyEvent {
                 code: KeyCode::Home,
                 ..
@@ -74,48 +62,14 @@ impl InputHandler {
                 Command::MoveToTop
             }
 
-            // Handle 'g' key for 'gg' sequence to jump to top
             KeyEvent {
-                code: KeyCode::Char('g'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                let now = Instant::now();
-                if let Some(first_g_time) = self.sequence_state.first_g_time {
-                    // Check if this is the second 'g' within 1 second
-                    if now.duration_since(first_g_time) <= Duration::from_millis(1000) {
-                        self.clear_sequence_state();
-                        return Command::MoveToTop;
-                    }
-                }
-                // This is either the first 'g' or too much time has passed
-                self.sequence_state.first_g_time = Some(now);
-                Command::Unknown
-            }
-
-            // Jump to bottom - 'G' and End key
-            KeyEvent {
-                code: KeyCode::Char('G'),
-                modifiers: KeyModifiers::SHIFT,
-                ..
-            }
-            | KeyEvent {
                 code: KeyCode::End, ..
             } => {
                 self.clear_sequence_state();
                 Command::MoveToBottom
             }
 
-            // Application control
-            KeyEvent {
-                code: KeyCode::Char('q'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                self.clear_sequence_state();
-                Command::Quit
-            }
-
+            // Control sequences
             KeyEvent {
                 code: KeyCode::Char('c'),
                 modifiers: KeyModifiers::CONTROL,
@@ -125,23 +79,43 @@ impl InputHandler {
                 Command::ForceQuit
             }
 
+            // Shift+char sequences
             KeyEvent {
-                code: KeyCode::Char('r'),
-                modifiers: KeyModifiers::NONE,
+                code: KeyCode::Char('G'),
+                modifiers: KeyModifiers::SHIFT,
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::RefreshStatus
+                Command::MoveToBottom
             }
 
-            // Help
+            // Handle all regular characters
             KeyEvent {
-                code: KeyCode::Char('?'),
+                code: KeyCode::Char(c),
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                self.clear_sequence_state();
-                Command::ShowHelp
+                // Check if this forms a two-key sequence
+                if let Some(command) = self.handle_two_key_sequence(c) {
+                    return command;
+                }
+
+                // If it's not a sequence, check for single-key commands
+                let command = match c {
+                    'j' => Command::MoveDown,
+                    'k' => Command::MoveUp,
+                    'q' => Command::Quit,
+                    'r' => Command::RefreshStatus,
+                    '?' => Command::ShowHelp,
+                    _ => Command::Unknown,
+                };
+
+                // Only clear sequence state if we found a single-key command
+                if !matches!(command, Command::Unknown) {
+                    self.clear_sequence_state();
+                }
+
+                command
             }
 
             // Default case
@@ -153,7 +127,31 @@ impl InputHandler {
     }
 
     fn clear_sequence_state(&mut self) {
-        self.sequence_state.first_g_time = None;
+        self.previous_key = None;
+    }
+
+    fn handle_two_key_sequence(&mut self, current_char: char) -> Option<Command> {
+        let now = Instant::now();
+        let sequence_timeout = Duration::from_millis(1000);
+
+        if let Some(prev) = &self.previous_key {
+            if now.duration_since(prev.timestamp) <= sequence_timeout {
+                let sequence = format!("{}{}", prev.character, current_char);
+                self.clear_sequence_state();
+
+                return match sequence.as_str() {
+                    "gg" => Some(Command::MoveToTop),
+                    _ => None,
+                };
+            }
+        }
+
+        // Store this key as the potential first key of a sequence
+        self.previous_key = Some(PreviousKey {
+            character: current_char,
+            timestamp: now,
+        });
+        None
     }
 
     pub fn get_help_text() -> Vec<&'static str> {
@@ -259,10 +257,44 @@ mod tests {
         // First 'g'
         assert_eq!(handler.handle_key(g_key), Command::Unknown);
 
-        // Wait and simulate timeout by manually clearing state
+        // Simulate timeout by manually clearing state (represents passage of time)
         handler.clear_sequence_state();
 
         // Second 'g' after timeout should be treated as first 'g' again
         assert_eq!(handler.handle_key(g_key), Command::Unknown);
+    }
+
+    #[test]
+    fn test_generic_sequence_handling() {
+        let mut handler = InputHandler::new();
+
+        // Test that non-sequence keys still work correctly
+        let j_key = KeyEvent {
+            code: KeyCode::Char('j'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(j_key), Command::MoveDown);
+
+        // Test that unknown sequences return Unknown for both keys
+        let x_key = KeyEvent {
+            code: KeyCode::Char('x'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+
+        let y_key = KeyEvent {
+            code: KeyCode::Char('y'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+
+        // First key of unknown sequence
+        assert_eq!(handler.handle_key(x_key), Command::Unknown);
+        // Second key of unknown sequence
+        assert_eq!(handler.handle_key(y_key), Command::Unknown);
     }
 }
