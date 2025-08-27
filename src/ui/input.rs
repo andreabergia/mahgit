@@ -134,8 +134,8 @@ impl InputHandler {
         let now = Instant::now();
         let sequence_timeout = Duration::from_millis(1000);
 
-        if let Some(prev) = &self.previous_key {
-            if now.duration_since(prev.timestamp) <= sequence_timeout {
+        if let Some(prev) = &self.previous_key
+            && now.duration_since(prev.timestamp) <= sequence_timeout {
                 let sequence = format!("{}{}", prev.character, current_char);
                 self.clear_sequence_state();
 
@@ -143,7 +143,6 @@ impl InputHandler {
                     "gg" => Some(Command::MoveToTop),
                     _ => None,
                 };
-            }
         }
 
         // Store this key as the potential first key of a sequence

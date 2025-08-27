@@ -167,14 +167,4 @@ impl<'a> StatusView<'a> {
         }
     }
 
-    fn truncate_path(path: &str, max_width: usize) -> String {
-        if path.len() <= max_width {
-            path.to_string()
-        } else if max_width <= 3 {
-            "...".to_string()
-        } else {
-            let keep_end = max_width - 3;
-            format!("...{}", &path[path.len() - keep_end..])
-        }
-    }
 }

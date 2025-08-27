@@ -177,8 +177,8 @@ impl NavigationState {
             .iter()
             .position(|&s| s == self.current_section)?;
 
-        for i in (current_pos + 1)..section_order.len() {
-            let section = section_order[i];
+        for section in section_order.iter().skip(current_pos + 1) {
+            let section = *section;
             if self
                 .sections
                 .iter()

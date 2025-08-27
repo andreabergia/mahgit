@@ -17,6 +17,7 @@ use std::io::{Stdout, stdout};
 
 pub struct App {
     should_quit: bool,
+    #[allow(dead_code)]
     current_view: ViewType,
     status: RepositoryStatus,
     navigation: NavigationState,
