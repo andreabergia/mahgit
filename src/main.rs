@@ -1,11 +1,11 @@
-pub mod display;
 pub mod repository;
 pub mod status;
+pub mod ui;
 
-use display::display_status;
 use repository::{Repository, RepositoryError};
 use status::RepositoryStatus;
-use std::process;
+use std::{env, process};
+use ui::{App, console};
 
 fn main() {
     if let Err(e) = run() {
@@ -20,8 +20,21 @@ fn main() {
 }
 
 fn run() -> Result<(), RepositoryError> {
+    let args: Vec<String> = env::args().collect();
+    let use_console = args.iter().any(|arg| arg == "--console");
+
     let repo = Repository::discover(".")?;
     let status = RepositoryStatus::new(&repo)?;
-    display_status(&status);
+
+    if use_console {
+        console::display_status(&status);
+    } else {
+        let mut app = App::new(status);
+        if let Err(e) = app.run() {
+            eprintln!("UI Error: {}", e);
+            process::exit(1);
+        }
+    }
+
     Ok(())
 }

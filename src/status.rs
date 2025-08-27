@@ -64,6 +64,32 @@ impl RepositoryStatus {
             && self.untracked.is_empty()
             && self.conflicted.is_empty()
     }
+
+    pub fn staged_files(&self) -> &Vec<String> {
+        &self.staged
+    }
+
+    pub fn unstaged_files(&self) -> &Vec<String> {
+        &self.unstaged
+    }
+
+    pub fn untracked_files(&self) -> &Vec<String> {
+        &self.untracked
+    }
+
+    pub fn conflicted_files(&self) -> &Vec<String> {
+        &self.conflicted
+    }
+
+    pub fn empty() -> Self {
+        RepositoryStatus {
+            branch_name: "main".to_string(),
+            staged: Vec::new(),
+            unstaged: Vec::new(),
+            untracked: Vec::new(),
+            conflicted: Vec::new(),
+        }
+    }
 }
 
 #[cfg(test)]
