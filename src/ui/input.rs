@@ -14,6 +14,12 @@ pub enum Command {
     ForceQuit,
     RefreshStatus,
 
+    // File operations
+    StageFile,
+    UnstageFile,
+    AddUntracked,
+    ToggleStage,
+
     // Help
     ShowHelp,
 
@@ -89,6 +95,16 @@ impl InputHandler {
                 Command::MoveToBottom
             }
 
+            // Handle space key
+            KeyEvent {
+                code: KeyCode::Char(' '),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                self.clear_sequence_state();
+                Command::ToggleStage
+            }
+
             // Handle all regular characters
             KeyEvent {
                 code: KeyCode::Char(c),
@@ -106,6 +122,9 @@ impl InputHandler {
                     'k' => Command::MoveUp,
                     'q' => Command::Quit,
                     'r' => Command::RefreshStatus,
+                    's' => Command::StageFile,
+                    'u' => Command::UnstageFile,
+                    'a' => Command::AddUntracked,
                     '?' => Command::ShowHelp,
                     _ => Command::Unknown,
                 };
@@ -161,6 +180,12 @@ impl InputHandler {
             "  k/↑     Move up",
             "  gg/Home Jump to top",
             "  G/End   Jump to bottom",
+            "",
+            "File Operations:",
+            "  s       Stage file",
+            "  u       Unstage file",
+            "  a       Add untracked file",
+            "  Space   Toggle stage/unstage",
             "",
             "Application:",
             "  q       Quit application",
@@ -296,5 +321,63 @@ mod tests {
         assert_eq!(handler.handle_key(x_key), Command::Unknown);
         // Second key of unknown sequence
         assert_eq!(handler.handle_key(y_key), Command::Unknown);
+    }
+
+    #[test]
+    fn test_file_operation_keys() {
+        let mut handler = InputHandler::new();
+
+        let stage_key = KeyEvent {
+            code: KeyCode::Char('s'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(stage_key), Command::StageFile);
+
+        let unstage_key = KeyEvent {
+            code: KeyCode::Char('u'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(unstage_key), Command::UnstageFile);
+
+        let add_key = KeyEvent {
+            code: KeyCode::Char('a'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(add_key), Command::AddUntracked);
+
+        let space_key = KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(space_key), Command::ToggleStage);
+    }
+
+    #[test]
+    fn test_help_key() {
+        let mut handler = InputHandler::new();
+
+        let help_key = KeyEvent {
+            code: KeyCode::Char('?'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(help_key), Command::ShowHelp);
+    }
+
+    #[test]
+    fn test_help_text_content() {
+        let help_text = InputHandler::get_help_text();
+        assert!(!help_text.is_empty());
+        assert!(help_text.iter().any(|line| line.contains("?")));
+        assert!(help_text.iter().any(|line| line.contains("Show this help")));
     }
 }
