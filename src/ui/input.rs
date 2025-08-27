@@ -135,14 +135,15 @@ impl InputHandler {
         let sequence_timeout = Duration::from_millis(1000);
 
         if let Some(prev) = &self.previous_key
-            && now.duration_since(prev.timestamp) <= sequence_timeout {
-                let sequence = format!("{}{}", prev.character, current_char);
-                self.clear_sequence_state();
+            && now.duration_since(prev.timestamp) <= sequence_timeout
+        {
+            let sequence = format!("{}{}", prev.character, current_char);
+            self.clear_sequence_state();
 
-                return match sequence.as_str() {
-                    "gg" => Some(Command::MoveToTop),
-                    _ => None,
-                };
+            return match sequence.as_str() {
+                "gg" => Some(Command::MoveToTop),
+                _ => None,
+            };
         }
 
         // Store this key as the potential first key of a sequence

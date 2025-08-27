@@ -52,43 +52,38 @@ impl<'a> StatusView<'a> {
 
     fn render_file_sections(&self, f: &mut Frame, area: Rect) {
         let mut items = Vec::new();
-        let mut current_line = 0;
-        let selected_global_index = self.navigation.get_global_index();
+        let mut current_file_index = 0;
 
         self.add_section_items(
             &mut items,
-            &mut current_line,
+            &mut current_file_index,
             StatusSection::Staged,
             "Staged changes",
             self.status.staged_files(),
-            selected_global_index,
         );
 
         self.add_section_items(
             &mut items,
-            &mut current_line,
+            &mut current_file_index,
             StatusSection::Unstaged,
             "Unstaged changes",
             self.status.unstaged_files(),
-            selected_global_index,
         );
 
         self.add_section_items(
             &mut items,
-            &mut current_line,
+            &mut current_file_index,
             StatusSection::Untracked,
             "Untracked files",
             self.status.untracked_files(),
-            selected_global_index,
         );
 
         self.add_section_items(
             &mut items,
-            &mut current_line,
+            &mut current_file_index,
             StatusSection::Conflicted,
             "Conflicted files",
             self.status.conflicted_files(),
-            selected_global_index,
         );
 
         let list = List::new(items);
@@ -98,11 +93,10 @@ impl<'a> StatusView<'a> {
     fn add_section_items(
         &self,
         items: &mut Vec<ListItem>,
-        current_line: &mut usize,
+        current_file_index: &mut usize,
         section: StatusSection,
         header: &str,
         files: &[String],
-        selected_global_index: usize,
     ) {
         if files.is_empty() {
             return;
@@ -117,13 +111,14 @@ impl<'a> StatusView<'a> {
             section_header,
             header_style,
         ))));
-        *current_line += 1;
 
-        for file in files.iter() {
+        for (file_index, file) in files.iter().enumerate() {
             let file_indicator = self.get_file_indicator(section);
             let content = format!("  {} {}", file_indicator, file);
 
-            let is_selected = *current_line == selected_global_index;
+            let is_selected = self.navigation.current_section() == section
+                && self.navigation.selected_index() == file_index;
+
             let style = if is_selected {
                 Style::default()
                     .bg(Color::DarkGray)
@@ -142,11 +137,10 @@ impl<'a> StatusView<'a> {
             }
 
             items.push(ListItem::new(Line::from(spans)));
-            *current_line += 1;
+            *current_file_index += 1;
         }
 
         items.push(ListItem::new(Line::from("")));
-        *current_line += 1;
     }
 
     fn get_file_indicator(&self, section: StatusSection) -> &'static str {
@@ -166,5 +160,4 @@ impl<'a> StatusView<'a> {
             StatusSection::Conflicted => Style::default().fg(Color::Yellow),
         }
     }
-
 }
