@@ -63,17 +63,17 @@ impl<'a> StatusView<'a> {
         self.add_section_items_with_entries(
             &mut items,
             &mut current_file_index,
-            StatusSection::Staged,
-            "Staged changes",
-            self.status.staged_files(),
+            StatusSection::Unstaged,
+            "Unstaged changes",
+            self.status.unstaged_files(),
         );
 
         self.add_section_items_with_entries(
             &mut items,
             &mut current_file_index,
-            StatusSection::Unstaged,
-            "Unstaged changes",
-            self.status.unstaged_files(),
+            StatusSection::Staged,
+            "Staged changes",
+            self.status.staged_files(),
         );
 
         self.add_section_items(

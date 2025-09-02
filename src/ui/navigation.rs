@@ -49,7 +49,7 @@ impl NavigationState {
         let current_section = sections
             .first()
             .map(|s| s.section_type)
-            .unwrap_or(StatusSection::Staged);
+            .unwrap_or(StatusSection::Unstaged);
 
         Self {
             current_section,
@@ -195,8 +195,8 @@ impl NavigationState {
         let mut start_index = 0;
 
         let section_configs = [
-            (StatusSection::Staged, status.staged_files().len()),
             (StatusSection::Unstaged, status.unstaged_files().len()),
+            (StatusSection::Staged, status.staged_files().len()),
             (StatusSection::Untracked, status.untracked_files().len()),
             (StatusSection::Conflicted, status.conflicted_files().len()),
         ];
@@ -223,8 +223,8 @@ impl NavigationState {
 
     fn find_previous_non_empty_section(&self) -> Option<StatusSection> {
         let section_order = [
-            StatusSection::Staged,
             StatusSection::Unstaged,
+            StatusSection::Staged,
             StatusSection::Untracked,
             StatusSection::Conflicted,
         ];
@@ -248,8 +248,8 @@ impl NavigationState {
 
     fn find_next_non_empty_section(&self) -> Option<StatusSection> {
         let section_order = [
-            StatusSection::Staged,
             StatusSection::Unstaged,
+            StatusSection::Staged,
             StatusSection::Untracked,
             StatusSection::Conflicted,
         ];
@@ -346,7 +346,7 @@ mod tests {
         let nav = NavigationState::new(&status);
 
         assert!(!nav.has_selections());
-        assert_eq!(nav.current_section(), StatusSection::Staged);
+        assert_eq!(nav.current_section(), StatusSection::Unstaged);
         assert_eq!(nav.selected_index(), 0);
     }
 
@@ -384,24 +384,25 @@ mod tests {
         let status = create_test_status_with_files();
         let mut nav = NavigationState::new(&status);
 
-        // Start in staged section
-        assert_eq!(nav.current_section(), StatusSection::Staged);
-        assert_eq!(nav.selected_index(), 0);
-
-        // Move to last item in staged section
-        nav.move_down();
-        assert_eq!(nav.selected_index(), 1);
-        assert_eq!(nav.current_section(), StatusSection::Staged);
-
-        // Move down from last item in staged should go to first item in unstaged
-        nav.move_down();
+        // Start in unstaged section (now first)
         assert_eq!(nav.current_section(), StatusSection::Unstaged);
         assert_eq!(nav.selected_index(), 0);
 
-        // Move up from first item in unstaged should go to last item in staged
-        nav.move_up();
+        // Move to last item in unstaged section
+        nav.move_down();
+        nav.move_down();
+        assert_eq!(nav.selected_index(), 2);
+        assert_eq!(nav.current_section(), StatusSection::Unstaged);
+
+        // Move down from last item in unstaged should go to first item in staged
+        nav.move_down();
         assert_eq!(nav.current_section(), StatusSection::Staged);
-        assert_eq!(nav.selected_index(), 1);
+        assert_eq!(nav.selected_index(), 0);
+
+        // Move up from first item in staged should go to last item in unstaged
+        nav.move_up();
+        assert_eq!(nav.current_section(), StatusSection::Unstaged);
+        assert_eq!(nav.selected_index(), 2);
     }
 
     #[test]
@@ -409,14 +410,22 @@ mod tests {
         let status = create_test_status_with_files();
         let mut nav = NavigationState::new(&status);
 
-        // Navigate to the end of unstaged section
-        nav.move_down(); // staged[1]
-        nav.move_down(); // unstaged[0]
+        // Navigate to the end of unstaged section (now first)
         nav.move_down(); // unstaged[1]
         nav.move_down(); // unstaged[2]
 
         assert_eq!(nav.current_section(), StatusSection::Unstaged);
         assert_eq!(nav.selected_index(), 2);
+
+        // Move to staged section
+        nav.move_down(); // staged[0]
+        assert_eq!(nav.current_section(), StatusSection::Staged);
+        assert_eq!(nav.selected_index(), 0);
+
+        // Move to end of staged section
+        nav.move_down(); // staged[1]
+        assert_eq!(nav.current_section(), StatusSection::Staged);
+        assert_eq!(nav.selected_index(), 1);
 
         // Move to untracked section
         nav.move_down();
@@ -450,16 +459,16 @@ mod tests {
         };
         let mut nav = NavigationState::new(&status);
 
-        // Start in staged
+        // Start in staged (unstaged is empty so it's skipped, staged comes next)
         assert_eq!(nav.current_section(), StatusSection::Staged);
         assert_eq!(nav.selected_index(), 0);
 
-        // Move down should skip empty unstaged and go to untracked
+        // Move down should skip empty sections and go to untracked
         nav.move_down();
         assert_eq!(nav.current_section(), StatusSection::Untracked);
         assert_eq!(nav.selected_index(), 0);
 
-        // Move up should skip empty unstaged and go back to staged
+        // Move up should skip empty sections and go back to staged
         nav.move_up();
         assert_eq!(nav.current_section(), StatusSection::Staged);
         assert_eq!(nav.selected_index(), 0);
@@ -474,11 +483,12 @@ mod tests {
         nav.move_down();
         nav.move_down();
         nav.move_down();
-        assert_eq!(nav.current_section(), StatusSection::Unstaged);
+        nav.move_down();
+        assert_eq!(nav.current_section(), StatusSection::Staged);
 
         // Move to top
         nav.move_to_top();
-        assert_eq!(nav.current_section(), StatusSection::Staged);
+        assert_eq!(nav.current_section(), StatusSection::Unstaged);
         assert_eq!(nav.selected_index(), 0);
 
         // Move to bottom
@@ -492,22 +502,22 @@ mod tests {
         let status = create_test_status_with_files();
         let mut nav = NavigationState::new(&status);
 
-        // staged[0]
+        // unstaged[0] (now first)
         assert_eq!(nav.get_global_index(), 0);
-
-        // staged[1]
-        nav.move_down();
-        assert_eq!(nav.get_global_index(), 1);
-
-        // unstaged[0]
-        nav.move_down();
-        assert_eq!(nav.get_global_index(), 2);
 
         // unstaged[1]
         nav.move_down();
-        assert_eq!(nav.get_global_index(), 3);
+        assert_eq!(nav.get_global_index(), 1);
 
         // unstaged[2]
+        nav.move_down();
+        assert_eq!(nav.get_global_index(), 2);
+
+        // staged[0]
+        nav.move_down();
+        assert_eq!(nav.get_global_index(), 3);
+
+        // staged[1]
         nav.move_down();
         assert_eq!(nav.get_global_index(), 4);
 
@@ -529,9 +539,7 @@ mod tests {
         let initial_status = create_test_status_with_files();
         let mut nav = NavigationState::new(&initial_status);
 
-        // Move to unstaged section
-        nav.move_down();
-        nav.move_down();
+        // Move to unstaged section (now first, so move to index 1)
         nav.move_down();
         assert_eq!(nav.current_section(), StatusSection::Unstaged);
         assert_eq!(nav.selected_index(), 1);
@@ -547,9 +555,7 @@ mod tests {
         let initial_status = create_test_status_with_files();
         let mut nav = NavigationState::new(&initial_status);
 
-        // Move to the last unstaged file
-        nav.move_down(); // staged[1]
-        nav.move_down(); // unstaged[0]
+        // Move to the last unstaged file (now first section)
         nav.move_down(); // unstaged[1]
         nav.move_down(); // unstaged[2]
         assert_eq!(nav.current_section(), StatusSection::Unstaged);
@@ -581,7 +587,25 @@ mod tests {
         let status = create_test_status_with_files();
         let mut nav = NavigationState::new(&status);
 
-        // Test selecting files from different sections
+        // Test selecting files from different sections (unstaged is now first)
+        let selected = nav.get_selected_file(&status).unwrap();
+        assert_eq!(selected.path, "unstaged1.txt");
+        assert!(matches!(selected.context, FileContext::Unstaged));
+
+        // Move to unstaged[1]
+        nav.move_down();
+        let selected = nav.get_selected_file(&status).unwrap();
+        assert_eq!(selected.path, "unstaged2.txt");
+        assert!(matches!(selected.context, FileContext::Unstaged));
+
+        // Move to unstaged[2]
+        nav.move_down();
+        let selected = nav.get_selected_file(&status).unwrap();
+        assert_eq!(selected.path, "unstaged3.txt");
+        assert!(matches!(selected.context, FileContext::Unstaged));
+
+        // Move to staged[0]
+        nav.move_down();
         let selected = nav.get_selected_file(&status).unwrap();
         assert_eq!(selected.path, "staged1.txt");
         assert!(matches!(selected.context, FileContext::Staged));
@@ -592,15 +616,7 @@ mod tests {
         assert_eq!(selected.path, "staged2.txt");
         assert!(matches!(selected.context, FileContext::Staged));
 
-        // Move to unstaged[0]
-        nav.move_down();
-        let selected = nav.get_selected_file(&status).unwrap();
-        assert_eq!(selected.path, "unstaged1.txt");
-        assert!(matches!(selected.context, FileContext::Unstaged));
-
         // Move to untracked[0]
-        nav.move_down();
-        nav.move_down();
         nav.move_down();
         let selected = nav.get_selected_file(&status).unwrap();
         assert_eq!(selected.path, "untracked1.txt");
@@ -626,22 +642,22 @@ mod tests {
         let status = create_test_status_with_files();
         let mut nav = NavigationState::new(&status);
 
-        // Staged section -> can unstage
-        assert!(matches!(
-            nav.get_operation_context(),
-            OperationContext::CanUnstage
-        ));
-
-        // Move to unstaged section -> can stage
-        nav.move_down();
-        nav.move_down();
+        // Unstaged section -> can stage (now first)
         assert!(matches!(
             nav.get_operation_context(),
             OperationContext::CanStage
         ));
 
-        // Move to untracked section -> can add
+        // Move to staged section -> can unstage
         nav.move_down();
+        nav.move_down();
+        nav.move_down();
+        assert!(matches!(
+            nav.get_operation_context(),
+            OperationContext::CanUnstage
+        ));
+
+        // Move to untracked section -> can add
         nav.move_down();
         nav.move_down();
         assert!(matches!(
@@ -662,9 +678,7 @@ mod tests {
         let initial_status = create_test_status_with_files();
         let mut nav = NavigationState::new(&initial_status);
 
-        // Move to first unstaged file
-        nav.move_down(); // staged[1]
-        nav.move_down(); // unstaged[0]
+        // Already at first unstaged file (now first section)
         assert_eq!(nav.current_section(), StatusSection::Unstaged);
         assert_eq!(nav.selected_index(), 0);
 
