@@ -55,5 +55,5 @@ pub fn create_test_repository() -> Result<TestRepository, Box<dyn std::error::Er
 #[allow(dead_code)]
 pub fn create_test_file(temp_dir: &TempDir, filename: &str, content: &str) {
     fs::write(temp_dir.path().join(filename), content)
-        .expect(&format!("Failed to create {}", filename));
+        .expect("Failed to create test file");
 }

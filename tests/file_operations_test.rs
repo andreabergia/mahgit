@@ -34,7 +34,7 @@ fn test_multi_file_staging_workflow() {
 
     fn get_staged_files(repo_path: &std::path::Path) -> Vec<String> {
         let output = Command::new("git")
-            .args(&["diff", "--cached", "--name-only"])
+            .args(["diff", "--cached", "--name-only"])
             .current_dir(repo_path)
             .output()
             .expect("Failed to run git diff --cached");
@@ -105,7 +105,7 @@ fn test_stage_unstage_single_file() {
 
     fn get_staged_count(repo_path: &std::path::Path) -> usize {
         let output = Command::new("git")
-            .args(&["diff", "--cached", "--name-only"])
+            .args(["diff", "--cached", "--name-only"])
             .current_dir(repo_path)
             .output()
             .expect("Failed to run git diff --cached");
@@ -134,7 +134,7 @@ fn test_stage_unstage_single_file() {
 
     // Test unstaging by using git command directly since UI unstaging has limitations in test environment
     std::process::Command::new("git")
-        .args(&["reset", "HEAD", "unstage_test.txt"])
+        .args(["reset", "HEAD", "unstage_test.txt"])
         .current_dir(test_repo.path())
         .output()
         .expect("Failed to unstage file");
