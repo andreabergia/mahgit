@@ -272,7 +272,7 @@ impl App {
         // Create the feedback message
         let block = Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .style(Style::default().bg(Color::DarkGray));
+            .style(Style::default().bg(Color::Rgb(20, 20, 20)));
 
         let paragraph = Paragraph::new(feedback.message.as_str())
             .block(block)

@@ -54,6 +54,5 @@ pub fn create_test_repository() -> Result<TestRepository, Box<dyn std::error::Er
 /// Helper function to create a test file in a temporary directory
 #[allow(dead_code)]
 pub fn create_test_file(temp_dir: &TempDir, filename: &str, content: &str) {
-    fs::write(temp_dir.path().join(filename), content)
-        .expect("Failed to create test file");
+    fs::write(temp_dir.path().join(filename), content).expect("Failed to create test file");
 }
