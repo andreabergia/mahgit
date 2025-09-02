@@ -26,7 +26,7 @@ This is "mahgit", a Rust-based terminal Git interface that aims to replicate Mag
 - `cargo clippy` - Run Rust linter for additional checks
 - `cargo clean` - Clean build artifacts
 
-Always run `cargo fmt` and `cargo clippy` before committing code.
+**IMPORTANT**: Always run `cargo fmt` and `cargo clippy` after making any code changes and before committing. Claude Code should automatically run these commands after completing any coding task to ensure code quality and consistency.
 
 ### Testing and Development
 - Use the `.tmp/` directory for temporary test files and repositories
