@@ -52,46 +52,56 @@ impl<'repo> DiffGenerator<'repo> {
 
         let mut hunks = Vec::new();
         let binary = false;
-        let mut current_hunk_index = None;
 
         git_diff.print(git2::DiffFormat::Patch, |_delta, hunk, line| {
-            if let Some(hunk_data) = hunk
-                && current_hunk_index != Some(hunks.len())
-            {
-                let diff_hunk = DiffHunk {
-                    header: String::from_utf8_lossy(hunk_data.header()).to_string(),
-                    old_start: hunk_data.old_start(),
-                    old_lines: hunk_data.old_lines(),
-                    new_start: hunk_data.new_start(),
-                    new_lines: hunk_data.new_lines(),
-                    lines: Vec::new(),
-                };
-                hunks.push(diff_hunk);
-                current_hunk_index = Some(hunks.len() - 1);
+            if let Some(hunk_data) = hunk {
+                let current_header = String::from_utf8_lossy(hunk_data.header()).to_string();
+
+                // Check if this is a new hunk we haven't seen yet
+                let is_new_hunk = hunks.is_empty()
+                    || hunks.last().map(|h: &DiffHunk| &h.header) != Some(&current_header);
+
+                if is_new_hunk {
+                    let diff_hunk = DiffHunk {
+                        header: current_header.clone(),
+                        old_start: hunk_data.old_start(),
+                        old_lines: hunk_data.old_lines(),
+                        new_start: hunk_data.new_start(),
+                        new_lines: hunk_data.new_lines(),
+                        lines: Vec::new(),
+                    };
+                    hunks.push(diff_hunk);
+                }
             }
 
-            if line.origin() != '\0' {
-                let line_type = match line.origin() {
-                    '+' => DiffLineType::Addition,
-                    '-' => DiffLineType::Deletion,
-                    ' ' => DiffLineType::Context,
-                    '\\' => DiffLineType::NoNewlineWarning,
-                    _ => DiffLineType::Context,
-                };
+            // Only process actual diff content lines (not headers or other metadata)
+            match line.origin() {
+                '+' | '-' | ' ' | '\\' => {
+                    let line_type = match line.origin() {
+                        '+' => DiffLineType::Addition,
+                        '-' => DiffLineType::Deletion,
+                        ' ' => DiffLineType::Context,
+                        '\\' => DiffLineType::NoNewlineWarning,
+                        _ => unreachable!(),
+                    };
 
-                let content = String::from_utf8_lossy(line.content()).to_string();
-                let old_line_number = line.old_lineno();
-                let new_line_number = line.new_lineno();
+                    let content = String::from_utf8_lossy(line.content()).to_string();
+                    let old_line_number = line.old_lineno();
+                    let new_line_number = line.new_lineno();
 
-                let diff_line = DiffLine {
-                    line_type,
-                    content,
-                    old_line_number,
-                    new_line_number,
-                };
+                    let diff_line = DiffLine {
+                        line_type,
+                        content,
+                        old_line_number,
+                        new_line_number,
+                    };
 
-                if let Some(last_hunk) = hunks.last_mut() {
-                    last_hunk.lines.push(diff_line);
+                    if let Some(last_hunk) = hunks.last_mut() {
+                        last_hunk.lines.push(diff_line);
+                    }
+                }
+                _ => {
+                    // Ignore other line types (headers, metadata, etc.)
                 }
             }
 

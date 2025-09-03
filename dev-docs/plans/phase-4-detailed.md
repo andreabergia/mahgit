@@ -146,11 +146,11 @@ pub enum Command {
 - ✅ Add scrolling mechanics and viewport calculation
 - ✅ Implement hunk navigation
 
-### Step 4: View Integration
-- Extend `App` struct with diff view state
-- Add view switching logic
-- Implement Enter key handling from status buffer
-- Add context-aware diff generation
+### Step 4: View Integration ✅ COMPLETED
+- ✅ Extend `App` struct with diff view state
+- ✅ Add view switching logic
+- ✅ Implement Enter key handling from status buffer
+- ✅ Add context-aware diff generation
 
 ### Step 5: Input Handling
 - Add new commands to input system

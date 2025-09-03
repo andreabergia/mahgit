@@ -20,6 +20,10 @@ pub enum Command {
     AddUntracked,
     ToggleStage,
 
+    // View commands
+    EnterDiffView,
+    ExitDiffView,
+
     // Help
     ShowHelp,
 
@@ -73,6 +77,21 @@ impl InputHandler {
             } => {
                 self.clear_sequence_state();
                 Command::MoveToBottom
+            }
+
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } => {
+                self.clear_sequence_state();
+                Command::EnterDiffView
+            }
+
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } => {
+                self.clear_sequence_state();
+                Command::ExitDiffView
             }
 
             // Control sequences

@@ -103,6 +103,10 @@ impl Repository {
 
         Ok(())
     }
+
+    pub fn git2_repo(&self) -> &Git2Repository {
+        &self.git_repo
+    }
 }
 
 #[cfg(test)]

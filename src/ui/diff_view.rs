@@ -108,15 +108,8 @@ impl DiffView {
             DiffLineType::NoNewlineWarning => ("\\", Color::Yellow),
         };
 
-        // Format line numbers
-        let line_numbers = match (diff_line.old_line_number, diff_line.new_line_number) {
-            (Some(old), Some(new)) => format!("{:>4} {:>4} ", old, new),
-            (Some(old), None) => format!("{:>4} {:>4} ", old, ""),
-            (None, Some(new)) => format!("{:>4} {:>4} ", "", new),
-            (None, None) => "          ".to_string(),
-        };
-
-        let content = format!("{}{}{}", line_numbers, prefix, diff_line.content);
+        // Just format the content with prefix, no line numbers for individual lines
+        let content = format!("{}{}", prefix, diff_line.content);
 
         Line::from(Span::styled(content, Style::default().fg(color)))
     }

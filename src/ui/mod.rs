@@ -5,6 +5,7 @@ pub mod input;
 pub mod navigation;
 pub mod status_view;
 
+use crate::diff::{Diff, DiffGenerator};
 use crate::operations::StagingOperations;
 use crate::repository::Repository;
 use crate::status::RepositoryStatus;
@@ -15,14 +16,13 @@ use crossterm::{
 };
 use feedback::FeedbackManager;
 use input::{Command, InputHandler};
-use navigation::{NavigationState, OperationContext};
+use navigation::{NavigationState, OperationContext, SelectedFile};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use status_view::StatusView;
 use std::io::{Stdout, stdout};
 
 pub struct App {
     should_quit: bool,
-    #[allow(dead_code)]
     current_view: ViewType,
     repository: Repository,
     status: RepositoryStatus,
@@ -30,11 +30,21 @@ pub struct App {
     input_handler: InputHandler,
     feedback_manager: FeedbackManager,
     show_help: bool,
+    current_diff: Option<Diff>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum ViewType {
     Status,
+    Diff(DiffViewState),
+}
+
+#[derive(Clone, PartialEq)]
+pub struct DiffViewState {
+    pub file_path: String,
+    pub diff_context: crate::diff::DiffContext,
+    pub scroll_position: usize,
+    pub hunk_index: Option<usize>,
 }
 
 impl App {
@@ -49,6 +59,7 @@ impl App {
             input_handler: InputHandler::new(),
             feedback_manager: FeedbackManager::new(),
             show_help: false,
+            current_diff: None,
         }
     }
 
@@ -149,6 +160,12 @@ impl App {
             Command::ToggleStage => {
                 self.toggle_stage_selected_file();
             }
+            Command::EnterDiffView => {
+                self.enter_diff_view();
+            }
+            Command::ExitDiffView => {
+                self.exit_diff_view();
+            }
             Command::Unknown => {
                 // Ignore unknown commands
             }
@@ -232,9 +249,69 @@ impl App {
         }
     }
 
+    fn enter_diff_view(&mut self) {
+        if !matches!(self.current_view, ViewType::Status) {
+            return; // Only allow entering diff view from status view
+        }
+
+        if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+            // Determine the appropriate diff context based on the file's location
+            let diff_context = self.determine_diff_context(&selected_file);
+
+            // Generate the diff
+            let diff_generator = DiffGenerator::new(self.repository.git2_repo());
+            match diff_generator.generate_diff(&selected_file.path, diff_context.clone()) {
+                Ok(diff) => {
+                    self.current_diff = Some(diff);
+                    self.current_view = ViewType::Diff(DiffViewState {
+                        file_path: selected_file.path.clone(),
+                        diff_context,
+                        scroll_position: 0,
+                        hunk_index: None,
+                    });
+                }
+                Err(err) => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(format!(
+                            "Failed to generate diff for {}: {}",
+                            selected_file.path, err
+                        )));
+                }
+            }
+        }
+    }
+
+    fn exit_diff_view(&mut self) {
+        if matches!(self.current_view, ViewType::Diff(_)) {
+            self.current_view = ViewType::Status;
+            self.current_diff = None;
+        }
+    }
+
+    fn determine_diff_context(&self, file: &SelectedFile) -> crate::diff::DiffContext {
+        use navigation::FileContext;
+
+        match file.context {
+            FileContext::Staged => crate::diff::DiffContext::IndexToHead,
+            FileContext::Unstaged => crate::diff::DiffContext::WorkingTreeToIndex,
+            FileContext::Untracked => crate::diff::DiffContext::WorkingTreeToIndex,
+            FileContext::Conflicted => crate::diff::DiffContext::WorkingTreeToHead,
+        }
+    }
+
     pub fn render(&self, f: &mut ratatui::Frame) {
-        let status_view = StatusView::new(&self.status, &self.navigation);
-        status_view.render(f, f.area());
+        match &self.current_view {
+            ViewType::Status => {
+                let status_view = StatusView::new(&self.status, &self.navigation);
+                status_view.render(f, f.area());
+            }
+            ViewType::Diff(_diff_state) => {
+                if let Some(diff) = &self.current_diff {
+                    let mut diff_view = diff_view::DiffView::new(diff.clone());
+                    diff_view.render(f, f.area());
+                }
+            }
+        }
 
         // Render feedback message if there is one
         if let Some(feedback) = self.feedback_manager.get_current_message() {
