@@ -151,11 +151,11 @@ pub enum Command {
 - ✅ Implement Tab key toggle for diff view navigation
 - ✅ Add context-aware diff generation
 
-### Step 5: Input Handling
-- Add new commands to input system
-- Implement diff navigation key bindings
-- Update help text
-- Add command routing for diff view
+### Step 5: Input Handling ✅ COMPLETED
+- ✅ Add new commands to input system
+- ✅ Implement diff navigation key bindings
+- ✅ Update help text
+- ✅ Add command routing for diff view
 
 ### Step 6: Error Handling
 - Handle binary files gracefully

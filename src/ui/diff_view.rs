@@ -22,10 +22,7 @@ impl DiffView {
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        // Update viewport height
-        self.viewport_height = area.height.saturating_sub(2) as usize; // Account for borders
-
+    pub fn render(&self, frame: &mut Frame, area: Rect) {
         // Handle binary files
         if self.diff.binary {
             self.render_binary_message(frame, area);
@@ -50,11 +47,14 @@ impl DiffView {
         frame.render_widget(paragraph, area);
     }
 
-    fn render_diff_content(&mut self, frame: &mut Frame, area: Rect) {
+    fn render_diff_content(&self, frame: &mut Frame, area: Rect) {
         // Create block with title
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" {} ", self.diff.file_path));
+
+        // Calculate viewport height
+        let viewport_height = area.height.saturating_sub(2) as usize; // Account for borders
 
         // Calculate content area
         let _inner_area = block.inner(area);
@@ -65,7 +65,7 @@ impl DiffView {
 
         // Calculate visible range
         let visible_start = self.scroll_position;
-        let visible_end = (visible_start + self.viewport_height).min(total_lines);
+        let visible_end = (visible_start + viewport_height).min(total_lines);
         let visible_lines = &diff_lines[visible_start..visible_end];
 
         // Create text content
@@ -75,8 +75,8 @@ impl DiffView {
         frame.render_widget(paragraph, area);
 
         // Render scrollbar if content is scrollable
-        if total_lines > self.viewport_height {
-            self.render_scrollbar(frame, area, total_lines);
+        if total_lines > viewport_height {
+            self.render_scrollbar(frame, area, total_lines, viewport_height);
         }
     }
 
@@ -114,7 +114,13 @@ impl DiffView {
         Line::from(Span::styled(content, Style::default().fg(color)))
     }
 
-    fn render_scrollbar(&mut self, frame: &mut Frame, area: Rect, total_lines: usize) {
+    fn render_scrollbar(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        total_lines: usize,
+        viewport_height: usize,
+    ) {
         let scrollbar_area = Rect {
             x: area.x + area.width - 1,
             y: area.y + 1,
@@ -124,7 +130,7 @@ impl DiffView {
 
         let mut scrollbar_state = ScrollbarState::default()
             .content_length(total_lines)
-            .viewport_content_length(self.viewport_height)
+            .viewport_content_length(viewport_height)
             .position(self.scroll_position);
 
         let scrollbar = Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight);
@@ -194,6 +200,10 @@ impl DiffView {
     pub fn go_to_bottom(&mut self) {
         let max_scroll = self.get_max_scroll_position();
         self.scroll_position = max_scroll;
+    }
+
+    pub fn update_viewport_height(&mut self, area_height: u16) {
+        self.viewport_height = area_height.saturating_sub(2) as usize;
     }
 
     fn get_max_scroll_position(&self) -> usize {

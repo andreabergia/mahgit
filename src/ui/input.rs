@@ -24,6 +24,16 @@ pub enum Command {
     EnterDiffView,
     ExitDiffView,
 
+    // Diff navigation commands
+    ScrollDiffUp,
+    ScrollDiffDown,
+    PageDiffUp,
+    PageDiffDown,
+    JumpToNextHunk,
+    JumpToPreviousHunk,
+    GoToTopOfDiff,
+    GoToBottomOfDiff,
+
     // Help
     ShowHelp,
 
@@ -86,6 +96,22 @@ impl InputHandler {
                 Command::EnterDiffView
             }
 
+            KeyEvent {
+                code: KeyCode::PageDown,
+                ..
+            } => {
+                self.clear_sequence_state();
+                Command::PageDiffDown
+            }
+
+            KeyEvent {
+                code: KeyCode::PageUp,
+                ..
+            } => {
+                self.clear_sequence_state();
+                Command::PageDiffUp
+            }
+
             // Control sequences
             KeyEvent {
                 code: KeyCode::Char('c'),
@@ -136,6 +162,10 @@ impl InputHandler {
                     's' => Command::StageFile,
                     'u' => Command::UnstageFile,
                     'a' => Command::AddUntracked,
+                    'f' => Command::PageDiffDown,
+                    'b' => Command::PageDiffUp,
+                    'n' => Command::JumpToNextHunk,
+                    'p' => Command::JumpToPreviousHunk,
                     '?' => Command::ShowHelp,
                     _ => Command::Unknown,
                 };
@@ -187,10 +217,17 @@ impl InputHandler {
     pub fn get_help_text() -> Vec<&'static str> {
         vec![
             "Navigation:",
-            "  j/↓     Move down",
-            "  k/↑     Move up",
-            "  gg/Home Jump to top",
-            "  G/End   Jump to bottom",
+            "  j/↓     Move down / Scroll diff down",
+            "  k/↑     Move up / Scroll diff up",
+            "  gg/Home Jump to top / Top of diff",
+            "  G/End   Jump to bottom / Bottom of diff",
+            "",
+            "Diff Navigation:",
+            "  Tab     Toggle diff view",
+            "  f/PgDn  Page down in diff",
+            "  b/PgUp  Page up in diff",
+            "  n       Jump to next hunk",
+            "  p       Jump to previous hunk",
             "",
             "File Operations:",
             "  s       Stage file",

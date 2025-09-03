@@ -19,6 +19,7 @@ use input::{Command, InputHandler};
 use navigation::{NavigationState, OperationContext, SelectedFile};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use status_view::StatusView;
+use std::cell::RefCell;
 use std::io::{Stdout, stdout};
 
 pub struct App {
@@ -31,6 +32,7 @@ pub struct App {
     feedback_manager: FeedbackManager,
     show_help: bool,
     current_diff: Option<Diff>,
+    diff_view: Option<RefCell<diff_view::DiffView>>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -60,6 +62,7 @@ impl App {
             feedback_manager: FeedbackManager::new(),
             show_help: false,
             current_diff: None,
+            diff_view: None,
         }
     }
 
@@ -127,18 +130,22 @@ impl App {
 
     fn handle_command(&mut self, command: Command) {
         match command {
-            Command::MoveUp => {
-                self.navigation.move_up();
-            }
-            Command::MoveDown => {
-                self.navigation.move_down();
-            }
-            Command::MoveToTop => {
-                self.navigation.move_to_top();
-            }
-            Command::MoveToBottom => {
-                self.navigation.move_to_bottom();
-            }
+            Command::MoveUp => match self.current_view {
+                ViewType::Status => self.navigation.move_up(),
+                ViewType::Diff(_) => self.scroll_diff_up(),
+            },
+            Command::MoveDown => match self.current_view {
+                ViewType::Status => self.navigation.move_down(),
+                ViewType::Diff(_) => self.scroll_diff_down(),
+            },
+            Command::MoveToTop => match self.current_view {
+                ViewType::Status => self.navigation.move_to_top(),
+                ViewType::Diff(_) => self.go_to_top_of_diff(),
+            },
+            Command::MoveToBottom => match self.current_view {
+                ViewType::Status => self.navigation.move_to_bottom(),
+                ViewType::Diff(_) => self.go_to_bottom_of_diff(),
+            },
             Command::Quit | Command::ForceQuit => {
                 self.should_quit = true;
             }
@@ -165,6 +172,30 @@ impl App {
             }
             Command::ExitDiffView => {
                 self.exit_diff_view();
+            }
+            Command::ScrollDiffUp => {
+                self.scroll_diff_up();
+            }
+            Command::ScrollDiffDown => {
+                self.scroll_diff_down();
+            }
+            Command::PageDiffUp => {
+                self.page_diff_up();
+            }
+            Command::PageDiffDown => {
+                self.page_diff_down();
+            }
+            Command::JumpToNextHunk => {
+                self.jump_to_next_hunk();
+            }
+            Command::JumpToPreviousHunk => {
+                self.jump_to_previous_hunk();
+            }
+            Command::GoToTopOfDiff => {
+                self.go_to_top_of_diff();
+            }
+            Command::GoToBottomOfDiff => {
+                self.go_to_bottom_of_diff();
             }
             Command::Unknown => {
                 // Ignore unknown commands
@@ -269,6 +300,7 @@ impl App {
             let diff_generator = DiffGenerator::new(self.repository.git2_repo());
             match diff_generator.generate_diff(&selected_file.path, diff_context.clone()) {
                 Ok(diff) => {
+                    self.diff_view = Some(RefCell::new(diff_view::DiffView::new(diff.clone())));
                     self.current_diff = Some(diff);
                     self.current_view = ViewType::Diff(DiffViewState {
                         file_path: selected_file.path.clone(),
@@ -292,6 +324,7 @@ impl App {
         if matches!(self.current_view, ViewType::Diff(_)) {
             self.current_view = ViewType::Status;
             self.current_diff = None;
+            self.diff_view = None;
         }
     }
 
@@ -307,15 +340,18 @@ impl App {
     }
 
     pub fn render(&self, f: &mut ratatui::Frame) {
+        let area = f.area();
+
         match &self.current_view {
             ViewType::Status => {
                 let status_view = StatusView::new(&self.status, &self.navigation);
-                status_view.render(f, f.area());
+                status_view.render(f, area);
             }
             ViewType::Diff(_diff_state) => {
-                if let Some(diff) = &self.current_diff {
-                    let mut diff_view = diff_view::DiffView::new(diff.clone());
-                    diff_view.render(f, f.area());
+                if let Some(diff_view_cell) = &self.diff_view {
+                    let mut diff_view = diff_view_cell.borrow_mut();
+                    diff_view.update_viewport_height(area.height);
+                    diff_view.render(f, area);
                 }
             }
         }
@@ -413,5 +449,62 @@ impl App {
         // Render the list content in the margin-adjusted area
         let help_list = List::new(help_items);
         f.render_widget(help_list, content_area);
+    }
+
+    // Diff navigation methods
+    fn scroll_diff_up(&mut self) {
+        if let Some(diff_view_cell) = &self.diff_view {
+            let mut diff_view = diff_view_cell.borrow_mut();
+            diff_view.scroll_up(1);
+        }
+    }
+
+    fn scroll_diff_down(&mut self) {
+        if let Some(diff_view_cell) = &self.diff_view {
+            let mut diff_view = diff_view_cell.borrow_mut();
+            diff_view.scroll_down(1);
+        }
+    }
+
+    fn page_diff_up(&mut self) {
+        if let Some(diff_view_cell) = &self.diff_view {
+            let mut diff_view = diff_view_cell.borrow_mut();
+            diff_view.page_up();
+        }
+    }
+
+    fn page_diff_down(&mut self) {
+        if let Some(diff_view_cell) = &self.diff_view {
+            let mut diff_view = diff_view_cell.borrow_mut();
+            diff_view.page_down();
+        }
+    }
+
+    fn jump_to_next_hunk(&mut self) {
+        if let Some(diff_view_cell) = &self.diff_view {
+            let mut diff_view = diff_view_cell.borrow_mut();
+            diff_view.jump_to_next_hunk();
+        }
+    }
+
+    fn jump_to_previous_hunk(&mut self) {
+        if let Some(diff_view_cell) = &self.diff_view {
+            let mut diff_view = diff_view_cell.borrow_mut();
+            diff_view.jump_to_previous_hunk();
+        }
+    }
+
+    fn go_to_top_of_diff(&mut self) {
+        if let Some(diff_view_cell) = &self.diff_view {
+            let mut diff_view = diff_view_cell.borrow_mut();
+            diff_view.go_to_top();
+        }
+    }
+
+    fn go_to_bottom_of_diff(&mut self) {
+        if let Some(diff_view_cell) = &self.diff_view {
+            let mut diff_view = diff_view_cell.borrow_mut();
+            diff_view.go_to_bottom();
+        }
     }
 }
