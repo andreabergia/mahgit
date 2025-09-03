@@ -513,6 +513,7 @@ dependencies = [
  "ratatui",
  "rexpect",
  "tempfile",
+ "thiserror",
 ]
 
 [[package]]
