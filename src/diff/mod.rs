@@ -1,6 +1,8 @@
 pub mod generator;
+pub mod parser;
 
 pub use generator::DiffGenerator;
+pub use parser::DiffParser;
 
 #[derive(Debug, Clone)]
 pub struct Diff {

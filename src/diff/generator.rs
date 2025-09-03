@@ -56,7 +56,8 @@ impl<'repo> DiffGenerator<'repo> {
 
         git_diff.print(git2::DiffFormat::Patch, |_delta, hunk, line| {
             if let Some(hunk_data) = hunk
-                && current_hunk_index != Some(hunks.len()) {
+                && current_hunk_index != Some(hunks.len())
+            {
                 let diff_hunk = DiffHunk {
                     header: String::from_utf8_lossy(hunk_data.header()).to_string(),
                     old_start: hunk_data.old_start(),
