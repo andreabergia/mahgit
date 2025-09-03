@@ -119,8 +119,7 @@ pub enum Command {
 ```
 
 **Key Bindings**:
-- `Enter` - Enter diff view from status buffer
-- `q`/`Escape` - Exit diff view
+- `Tab` - Toggle diff view (enter from status buffer, exit from diff view)
 - `j`/`k`/`↓`/`↑` - Line scrolling
 - `f`/`b`/`Page Down`/`Page Up` - Page scrolling
 - `n`/`p` - Next/previous hunk
@@ -149,7 +148,7 @@ pub enum Command {
 ### Step 4: View Integration ✅ COMPLETED
 - ✅ Extend `App` struct with diff view state
 - ✅ Add view switching logic
-- ✅ Implement Enter key handling from status buffer
+- ✅ Implement Tab key toggle for diff view navigation
 - ✅ Add context-aware diff generation
 
 ### Step 5: Input Handling

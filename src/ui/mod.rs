@@ -161,7 +161,7 @@ impl App {
                 self.toggle_stage_selected_file();
             }
             Command::EnterDiffView => {
-                self.enter_diff_view();
+                self.toggle_diff_view();
             }
             Command::ExitDiffView => {
                 self.exit_diff_view();
@@ -246,6 +246,13 @@ impl App {
             // If reload fails, we still want to continue, just won't have updated status
         } else {
             self.navigation.update_status(&self.status);
+        }
+    }
+
+    fn toggle_diff_view(&mut self) {
+        match &self.current_view {
+            ViewType::Status => self.enter_diff_view(),
+            ViewType::Diff(_) => self.exit_diff_view(),
         }
     }
 

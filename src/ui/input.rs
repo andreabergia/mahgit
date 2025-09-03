@@ -80,18 +80,10 @@ impl InputHandler {
             }
 
             KeyEvent {
-                code: KeyCode::Enter,
-                ..
+                code: KeyCode::Tab, ..
             } => {
                 self.clear_sequence_state();
                 Command::EnterDiffView
-            }
-
-            KeyEvent {
-                code: KeyCode::Esc, ..
-            } => {
-                self.clear_sequence_state();
-                Command::ExitDiffView
             }
 
             // Control sequences
