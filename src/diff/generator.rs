@@ -164,12 +164,11 @@ impl<'repo> DiffGenerator<'repo> {
 
         // If no hunks were generated and this is a working tree comparison,
         // check if it's an untracked file and generate synthetic diff
-        if hunks.is_empty() && matches!(context, DiffContext::WorkingTreeToIndex) {
-            if let Ok(synthetic_diff) =
-                self.generate_untracked_file_diff(file_path, context.clone())
-            {
-                return Ok(synthetic_diff);
-            }
+        if hunks.is_empty()
+            && matches!(context, DiffContext::WorkingTreeToIndex)
+            && let Ok(synthetic_diff) = self.generate_untracked_file_diff(file_path, context.clone())
+        {
+            return Ok(synthetic_diff);
         }
 
         Ok(Diff {
@@ -253,19 +252,31 @@ impl<'repo> DiffGenerator<'repo> {
         })?;
         let full_path = repo_workdir.join(file_path);
 
-        // Check if file exists in working tree but not in index (untracked)
-        if !full_path.exists() {
-            return Err(DiffError::FileNotFound(file_path.to_string()));
-        }
-
-        // Check if file exists in index
         let index = self.repo.index()?;
-        if index.get_path(Path::new(file_path), 0).is_some() {
-            // File exists in index, so this isn't an untracked file
-            return Err(DiffError::FileNotFound(format!(
-                "File {} is not untracked",
-                file_path
-            )));
+        let file_exists_in_working_tree = full_path.exists();
+        let file_exists_in_index = index.get_path(Path::new(file_path), 0).is_some();
+
+        match (file_exists_in_working_tree, file_exists_in_index) {
+            (true, false) => {
+                // File exists in working tree but not in index (untracked)
+                // Continue with untracked file diff generation below
+            }
+            (false, true) => {
+                // File deleted from working tree but still in index - generate deletion diff
+                return self.generate_deleted_file_diff(file_path, context);
+            }
+            (false, false) => {
+                // File doesn't exist anywhere
+                return Err(DiffError::FileNotFound(file_path.to_string()));
+            }
+            (true, true) => {
+                // File exists in both - this should be handled by regular git diff,
+                // not untracked file diff
+                return Err(DiffError::FileNotFound(format!(
+                    "File {} exists in both working tree and index",
+                    file_path
+                )));
+            }
         }
 
         // Read file content
@@ -316,6 +327,82 @@ impl<'repo> DiffGenerator<'repo> {
                 start: 1,
                 count: line_count as u32,
             },
+            stageable: true,
+            context_lines: 3,
+        };
+
+        Ok(Diff {
+            file_path: file_path.to_string(),
+            context,
+            hunks: vec![hunk],
+            binary: false,
+        })
+    }
+
+    fn generate_deleted_file_diff(
+        &self,
+        file_path: &str,
+        context: DiffContext,
+    ) -> Result<Diff, DiffError> {
+        use crate::diff::{HunkHeader, LineRange};
+        use std::path::Path;
+
+        // Get the file content from the index
+        let index = self.repo.index()?;
+        let entry = index.get_path(Path::new(file_path), 0).ok_or_else(|| {
+            DiffError::FileNotFound(format!("File {} not found in index", file_path))
+        })?;
+
+        // Get the blob content from the index
+        let blob = self.repo.find_blob(entry.id)?;
+        let content = std::str::from_utf8(blob.content())
+            .map_err(|_| DiffError::BinaryFile(file_path.to_string()))?;
+
+        // Check for problematic characters
+        if Self::contains_problematic_chars(content) {
+            return Err(DiffError::TerminalCompatibility(
+                "File contains problematic characters that may cause terminal issues".to_string(),
+            ));
+        }
+
+        let lines: Vec<&str> = content.lines().collect();
+        let line_count = lines.len();
+
+        // Check line count limit
+        if line_count > Self::MAX_LINES_PER_DIFF {
+            return Err(DiffError::TerminalCompatibility(format!(
+                "File too large ({} lines) - cannot display diff",
+                line_count
+            )));
+        }
+
+        // Create synthetic hunk showing entire file as deletions
+        let header = HunkHeader {
+            raw: format!("@@ -1,{} +0,0 @@", line_count),
+            old_start: 1,
+            old_lines: line_count as u32,
+            new_start: 0,
+            new_lines: 0,
+        };
+
+        let mut diff_lines = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            diff_lines.push(crate::diff::DiffLine {
+                content: line.to_string(),
+                line_type: crate::diff::LineType::Deletion,
+                old_line_no: Some(i + 1),
+                new_line_no: None,
+            });
+        }
+
+        let hunk = crate::diff::DiffHunk {
+            header,
+            lines: diff_lines,
+            old_range: LineRange {
+                start: 1,
+                count: line_count as u32,
+            },
+            new_range: LineRange { start: 0, count: 0 },
             stageable: true,
             context_lines: 3,
         };
@@ -472,5 +559,53 @@ mod tests {
         assert_eq!(hunk.lines[1].content, "New file line 2");
         assert_eq!(hunk.lines[0].new_line_no, Some(1));
         assert_eq!(hunk.lines[1].new_line_no, Some(2));
+    }
+
+    #[test]
+    fn test_deleted_file_diff() {
+        let (temp_dir, repo) = setup_test_repo();
+        let file_path = temp_dir.path().join("to_delete.txt");
+
+        // Create a file, add it to index, then delete it from working tree
+        std::fs::write(&file_path, "Line to be deleted\nAnother line\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index
+            .add_path(std::path::Path::new("to_delete.txt"))
+            .unwrap();
+        index.write().unwrap();
+
+        // Delete the file from working tree
+        std::fs::remove_file(&file_path).unwrap();
+
+        let generator = DiffGenerator::new(&repo);
+        let diff = generator
+            .generate_diff("to_delete.txt", DiffContext::WorkingTreeToIndex)
+            .unwrap();
+
+        assert_eq!(diff.file_path, "to_delete.txt");
+        assert_eq!(diff.context, DiffContext::WorkingTreeToIndex);
+        assert!(!diff.binary);
+        assert_eq!(diff.hunks.len(), 1);
+
+        let hunk = &diff.hunks[0];
+        assert_eq!(hunk.header.old_start, 1);
+        assert_eq!(hunk.header.old_lines, 2);
+        assert_eq!(hunk.header.new_start, 0);
+        assert_eq!(hunk.header.new_lines, 0);
+        assert_eq!(hunk.lines.len(), 2);
+
+        // Check that all lines are deletions
+        for line in &hunk.lines {
+            assert_eq!(line.line_type, crate::diff::LineType::Deletion);
+            assert!(line.old_line_no.is_some());
+            assert_eq!(line.new_line_no, None);
+        }
+
+        // Git2's native diff output includes newlines in content
+        assert_eq!(hunk.lines[0].content, "Line to be deleted\n");
+        assert_eq!(hunk.lines[1].content, "Another line\n");
+        assert_eq!(hunk.lines[0].old_line_no, Some(1));
+        assert_eq!(hunk.lines[1].old_line_no, Some(2));
     }
 }

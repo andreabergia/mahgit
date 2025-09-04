@@ -120,8 +120,7 @@ impl<'repo> HunkStager<'repo> {
                 LineType::NoNewlineEOF => "\\",
             };
 
-            writeln!(patch, "{}{}", prefix, line.content)
-                .map_err(RepositoryError::IoError)?;
+            writeln!(patch, "{}{}", prefix, line.content).map_err(RepositoryError::IoError)?;
         }
 
         Ok(patch)
@@ -163,8 +162,7 @@ impl<'repo> HunkStager<'repo> {
                 LineType::NoNewlineEOF => "\\",
             };
 
-            writeln!(patch, "{}{}", prefix, line.content)
-                .map_err(RepositoryError::IoError)?;
+            writeln!(patch, "{}{}", prefix, line.content).map_err(RepositoryError::IoError)?;
         }
 
         Ok(patch)
