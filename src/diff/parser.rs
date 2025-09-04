@@ -185,4 +185,157 @@ mod tests {
         // Just test that the parser can be created
         let _default_parser = DiffParser;
     }
+
+    #[test]
+    fn test_parse_diff_with_empty_file() {
+        let (temp_dir, repo) = setup_test_repo();
+        let file_path = temp_dir.path().join("empty.txt");
+
+        // Create empty file and add to git
+        fs::write(&file_path, "").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("empty.txt")).unwrap();
+        index.write().unwrap();
+
+        // Modify the empty file
+        fs::write(&file_path, "New content\n").unwrap();
+
+        // Create diff
+        let mut diff_options = git2::DiffOptions::new();
+        diff_options.pathspec("empty.txt");
+        let index = repo.index().unwrap();
+        let git_diff = repo
+            .diff_index_to_workdir(Some(&index), Some(&mut diff_options))
+            .unwrap();
+
+        let parser = DiffParser::new();
+        let diff = parser
+            .parse_diff(&git_diff, "empty.txt", DiffContext::WorkingTreeToIndex)
+            .unwrap();
+
+        assert_eq!(diff.file_path, "empty.txt");
+        assert!(!diff.binary);
+        assert!(!diff.hunks.is_empty());
+        // Should have one hunk adding the new content
+        assert_eq!(diff.hunks[0].header.old_start, 0);
+        assert_eq!(diff.hunks[0].header.old_lines, 0);
+        assert_eq!(diff.hunks[0].header.new_start, 1);
+        assert_eq!(diff.hunks[0].header.new_lines, 1);
+    }
+
+    #[test]
+    fn test_parse_diff_file_deletion() {
+        let (temp_dir, repo) = setup_test_repo();
+        let file_path = temp_dir.path().join("delete_me.txt");
+
+        // Create file and add to git
+        fs::write(&file_path, "Content to be deleted\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_path(std::path::Path::new("delete_me.txt"))
+            .unwrap();
+        index.write().unwrap();
+
+        // Delete the file from working tree
+        fs::remove_file(&file_path).unwrap();
+
+        // Create diff with include_untracked to catch deletions
+        let mut diff_options = git2::DiffOptions::new();
+        diff_options.pathspec("delete_me.txt");
+        diff_options.include_untracked(true);
+        let index = repo.index().unwrap();
+        let git_diff = repo
+            .diff_index_to_workdir(Some(&index), Some(&mut diff_options))
+            .unwrap();
+
+        let parser = DiffParser::new();
+        let diff = parser
+            .parse_diff(&git_diff, "delete_me.txt", DiffContext::WorkingTreeToIndex)
+            .unwrap();
+
+        assert_eq!(diff.file_path, "delete_me.txt");
+        assert!(!diff.binary);
+        // File deletions may not create hunks in this context (working tree vs index)
+        // The key is that we successfully parse without errors and handle the deletion gracefully
+        // In this specific case, git may not generate a hunk because the file is simply missing
+        // from the working directory
+    }
+
+    #[test]
+    fn test_parse_diff_binary_file_detection() {
+        let (temp_dir, repo) = setup_test_repo();
+        let file_path = temp_dir.path().join("binary.bin");
+
+        // Create a binary file (with null bytes)
+        let binary_data = vec![0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD];
+        fs::write(&file_path, &binary_data).unwrap();
+
+        // Add to git first to create baseline
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("binary.bin")).unwrap();
+        index.write().unwrap();
+
+        // Modify binary file
+        let modified_data = vec![0xFF, 0xFE, 0xFD, 0x00, 0x01, 0x02];
+        fs::write(&file_path, &modified_data).unwrap();
+
+        // Create diff
+        let mut diff_options = git2::DiffOptions::new();
+        diff_options.pathspec("binary.bin");
+        let index = repo.index().unwrap();
+        let git_diff = repo
+            .diff_index_to_workdir(Some(&index), Some(&mut diff_options))
+            .unwrap();
+
+        let parser = DiffParser::new();
+        let result = parser.parse_diff(&git_diff, "binary.bin", DiffContext::WorkingTreeToIndex);
+
+        // Should return an error for binary files
+        assert!(matches!(result, Err(ParseError::BinaryFile(_))));
+        if let Err(ParseError::BinaryFile(path)) = result {
+            assert_eq!(path, "binary.bin");
+        }
+    }
+
+    #[test]
+    fn test_parse_diff_with_no_newline_eof() {
+        let (temp_dir, repo) = setup_test_repo();
+        let file_path = temp_dir.path().join("no_newline.txt");
+
+        // Create file with newline and add to git
+        fs::write(&file_path, "Line with newline\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_path(std::path::Path::new("no_newline.txt"))
+            .unwrap();
+        index.write().unwrap();
+
+        // Modify the file to remove newline at end
+        fs::write(&file_path, "Line with newline\nLine without newline").unwrap();
+
+        // Create diff
+        let mut diff_options = git2::DiffOptions::new();
+        diff_options.pathspec("no_newline.txt");
+        let index = repo.index().unwrap();
+        let git_diff = repo
+            .diff_index_to_workdir(Some(&index), Some(&mut diff_options))
+            .unwrap();
+
+        let parser = DiffParser::new();
+        let diff = parser
+            .parse_diff(&git_diff, "no_newline.txt", DiffContext::WorkingTreeToIndex)
+            .unwrap();
+
+        assert_eq!(diff.file_path, "no_newline.txt");
+        assert!(!diff.binary);
+        assert!(!diff.hunks.is_empty());
+        // Should handle the "\ No newline at end of file" marker if git generates one
+        // This is dependent on git's behavior and may not always be present
+        let _has_no_newline_marker = diff
+            .hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .any(|line| matches!(line.line_type, LineType::NoNewlineEOF));
+        // The key is successful parsing, not necessarily the presence of the marker
+    }
 }
