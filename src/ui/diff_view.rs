@@ -1,5 +1,5 @@
 use crate::diff::generator::DiffError;
-use crate::diff::{Diff, DiffLine, DiffLineType};
+use crate::diff::{Diff, DiffLine, LineType};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -154,7 +154,10 @@ impl DiffView {
                 Style::default().fg(Color::Cyan)
             };
 
-            lines.push(Line::from(Span::styled(hunk.header.clone(), header_style)));
+            lines.push(Line::from(Span::styled(
+                hunk.header.raw.clone(),
+                header_style,
+            )));
 
             // Add diff lines
             for diff_line in &hunk.lines {
@@ -168,10 +171,10 @@ impl DiffView {
 
     fn format_diff_line(&self, diff_line: &DiffLine) -> Line<'static> {
         let (prefix, color) = match diff_line.line_type {
-            DiffLineType::Addition => ("+", Color::Green),
-            DiffLineType::Deletion => ("-", Color::Red),
-            DiffLineType::Context => (" ", Color::White),
-            DiffLineType::NoNewlineWarning => ("\\", Color::Yellow),
+            LineType::Addition => ("+", Color::Green),
+            LineType::Deletion => ("-", Color::Red),
+            LineType::Context => (" ", Color::White),
+            LineType::NoNewlineEOF => ("\\", Color::Yellow),
         };
 
         // Just format the content with prefix, no line numbers for individual lines
@@ -391,33 +394,39 @@ impl DiffView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff::{DiffContext, DiffHunk, DiffLine, DiffLineType};
+    use crate::diff::{DiffContext, DiffHunk, DiffLine, HunkHeader, LineRange, LineType};
 
     fn create_test_diff() -> Diff {
         let hunk = DiffHunk {
-            header: "@@ -1,3 +1,4 @@".to_string(),
-            old_start: 1,
-            old_lines: 3,
-            new_start: 1,
-            new_lines: 4,
+            header: HunkHeader {
+                raw: "@@ -1,3 +1,4 @@".to_string(),
+                old_start: 1,
+                old_lines: 3,
+                new_start: 1,
+                new_lines: 4,
+            },
+            old_range: LineRange { start: 1, count: 3 },
+            new_range: LineRange { start: 1, count: 4 },
+            stageable: true,
+            context_lines: 3,
             lines: vec![
                 DiffLine {
-                    line_type: DiffLineType::Context,
                     content: "line 1".to_string(),
-                    old_line_number: Some(1),
-                    new_line_number: Some(1),
+                    line_type: LineType::Context,
+                    old_line_no: Some(1),
+                    new_line_no: Some(1),
                 },
                 DiffLine {
-                    line_type: DiffLineType::Deletion,
                     content: "old line".to_string(),
-                    old_line_number: Some(2),
-                    new_line_number: None,
+                    line_type: LineType::Deletion,
+                    old_line_no: Some(2),
+                    new_line_no: None,
                 },
                 DiffLine {
-                    line_type: DiffLineType::Addition,
                     content: "new line".to_string(),
-                    old_line_number: None,
-                    new_line_number: Some(2),
+                    line_type: LineType::Addition,
+                    old_line_no: None,
+                    new_line_no: Some(2),
                 },
             ],
         };
@@ -508,45 +517,63 @@ mod tests {
 
     fn create_multi_hunk_diff() -> Diff {
         let hunk1 = DiffHunk {
-            header: "@@ -1,3 +1,4 @@".to_string(),
-            old_start: 1,
-            old_lines: 3,
-            new_start: 1,
-            new_lines: 4,
+            header: HunkHeader {
+                raw: "@@ -1,3 +1,4 @@".to_string(),
+                old_start: 1,
+                old_lines: 3,
+                new_start: 1,
+                new_lines: 4,
+            },
+            old_range: LineRange { start: 1, count: 3 },
+            new_range: LineRange { start: 1, count: 4 },
+            stageable: true,
+            context_lines: 3,
             lines: vec![
                 DiffLine {
-                    line_type: DiffLineType::Context,
                     content: "line 1".to_string(),
-                    old_line_number: Some(1),
-                    new_line_number: Some(1),
+                    line_type: LineType::Context,
+                    old_line_no: Some(1),
+                    new_line_no: Some(1),
                 },
                 DiffLine {
-                    line_type: DiffLineType::Deletion,
                     content: "old line".to_string(),
-                    old_line_number: Some(2),
-                    new_line_number: None,
+                    line_type: LineType::Deletion,
+                    old_line_no: Some(2),
+                    new_line_no: None,
                 },
             ],
         };
 
         let hunk2 = DiffHunk {
-            header: "@@ -10,2 +11,3 @@".to_string(),
-            old_start: 10,
-            old_lines: 2,
-            new_start: 11,
-            new_lines: 3,
+            header: HunkHeader {
+                raw: "@@ -10,2 +11,3 @@".to_string(),
+                old_start: 10,
+                old_lines: 2,
+                new_start: 11,
+                new_lines: 3,
+            },
+            old_range: LineRange {
+                start: 10,
+                count: 2,
+            },
+            new_range: LineRange {
+                start: 11,
+                count: 3,
+            },
+            stageable: true,
+            context_lines: 3,
             lines: vec![
                 DiffLine {
-                    line_type: DiffLineType::Context,
                     content: "line 10".to_string(),
-                    old_line_number: Some(10),
-                    new_line_number: Some(11),
+                    line_type: LineType::Context,
+                    old_line_no: Some(10),
+                    new_line_no: Some(11),
                 },
                 DiffLine {
-                    line_type: DiffLineType::Addition,
                     content: "new line".to_string(),
-                    old_line_number: None,
-                    new_line_number: Some(12),
+                    line_type: LineType::Addition,
+                    old_line_no: None,
+                    new_line_no: Some(12),
                 },
             ],
         };

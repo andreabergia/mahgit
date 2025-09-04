@@ -1,4 +1,4 @@
-use crate::diff::{Diff, DiffContext, DiffHunk, DiffLine, DiffLineType};
+use crate::diff::{Diff, DiffContext, DiffHunk, DiffLine, HunkHeader, LineRange, LineType};
 use git2::{DiffFormat, DiffHunk as Git2DiffHunk, DiffLine as Git2DiffLine};
 
 #[derive(Debug, thiserror::Error)]
@@ -65,32 +65,46 @@ impl DiffParser {
     }
 
     fn parse_hunk(&self, hunk: &Git2DiffHunk) -> DiffHunk {
+        let header_raw = String::from_utf8_lossy(hunk.header()).to_string();
+
         DiffHunk {
-            header: String::from_utf8_lossy(hunk.header()).to_string(),
-            old_start: hunk.old_start(),
-            old_lines: hunk.old_lines(),
-            new_start: hunk.new_start(),
-            new_lines: hunk.new_lines(),
+            header: HunkHeader {
+                raw: header_raw,
+                old_start: hunk.old_start(),
+                old_lines: hunk.old_lines(),
+                new_start: hunk.new_start(),
+                new_lines: hunk.new_lines(),
+            },
             lines: Vec::new(),
+            old_range: LineRange {
+                start: hunk.old_start(),
+                count: hunk.old_lines(),
+            },
+            new_range: LineRange {
+                start: hunk.new_start(),
+                count: hunk.new_lines(),
+            },
+            stageable: true, // Default to stageable, will be updated based on context
+            context_lines: 3, // Default context lines, could be made configurable
         }
     }
 
     fn parse_line(&self, line: &Git2DiffLine) -> DiffLine {
         let line_type = match line.origin() {
-            '+' => DiffLineType::Addition,
-            '-' => DiffLineType::Deletion,
-            ' ' => DiffLineType::Context,
-            '\\' => DiffLineType::NoNewlineWarning,
-            _ => DiffLineType::Context,
+            '+' => LineType::Addition,
+            '-' => LineType::Deletion,
+            ' ' => LineType::Context,
+            '\\' => LineType::NoNewlineEOF,
+            _ => LineType::Context,
         };
 
         let content = String::from_utf8_lossy(line.content()).to_string();
 
         DiffLine {
-            line_type,
             content,
-            old_line_number: line.old_lineno(),
-            new_line_number: line.new_lineno(),
+            line_type,
+            old_line_no: line.old_lineno().map(|n| n as usize),
+            new_line_no: line.new_lineno().map(|n| n as usize),
         }
     }
 }

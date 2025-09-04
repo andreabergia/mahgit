@@ -21,26 +21,41 @@ pub enum DiffContext {
 
 #[derive(Debug, Clone)]
 pub struct DiffHunk {
-    pub header: String,
+    pub header: HunkHeader,
+    pub lines: Vec<DiffLine>,
+    pub old_range: LineRange,
+    pub new_range: LineRange,
+    pub stageable: bool,
+    pub context_lines: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct HunkHeader {
+    pub raw: String,
     pub old_start: u32,
     pub old_lines: u32,
     pub new_start: u32,
     pub new_lines: u32,
-    pub lines: Vec<DiffLine>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LineRange {
+    pub start: u32,
+    pub count: u32,
 }
 
 #[derive(Debug, Clone)]
 pub struct DiffLine {
-    pub line_type: DiffLineType,
     pub content: String,
-    pub old_line_number: Option<u32>,
-    pub new_line_number: Option<u32>,
+    pub line_type: LineType,
+    pub old_line_no: Option<usize>,
+    pub new_line_no: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum DiffLineType {
+pub enum LineType {
     Context,
     Addition,
     Deletion,
-    NoNewlineWarning,
+    NoNewlineEOF,
 }

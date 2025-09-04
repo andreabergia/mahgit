@@ -1,4 +1,4 @@
-use crate::diff::{Diff, DiffContext, DiffHunk, DiffLine, DiffLineType};
+use crate::diff::{Diff, DiffContext, DiffHunk, DiffLine, LineType};
 use git2::{DiffOptions, Repository};
 use std::path::Path;
 
@@ -75,15 +75,28 @@ impl<'repo> DiffGenerator<'repo> {
 
                 // Check if this is a new hunk we haven't seen yet
                 let is_new_hunk = hunks.is_empty()
-                    || hunks.last().map(|h: &DiffHunk| &h.header) != Some(&current_header);
+                    || hunks.last().map(|h: &DiffHunk| &h.header.raw) != Some(&current_header);
 
                 if is_new_hunk {
+                    use crate::diff::{HunkHeader, LineRange};
                     let diff_hunk = DiffHunk {
-                        header: current_header.clone(),
-                        old_start: hunk_data.old_start(),
-                        old_lines: hunk_data.old_lines(),
-                        new_start: hunk_data.new_start(),
-                        new_lines: hunk_data.new_lines(),
+                        header: HunkHeader {
+                            raw: current_header.clone(),
+                            old_start: hunk_data.old_start(),
+                            old_lines: hunk_data.old_lines(),
+                            new_start: hunk_data.new_start(),
+                            new_lines: hunk_data.new_lines(),
+                        },
+                        old_range: LineRange {
+                            start: hunk_data.old_start(),
+                            count: hunk_data.old_lines(),
+                        },
+                        new_range: LineRange {
+                            start: hunk_data.new_start(),
+                            count: hunk_data.new_lines(),
+                        },
+                        stageable: true,
+                        context_lines: 3,
                         lines: Vec::new(),
                     };
                     hunks.push(diff_hunk);
@@ -100,10 +113,10 @@ impl<'repo> DiffGenerator<'repo> {
                     }
 
                     let line_type = match line.origin() {
-                        '+' => DiffLineType::Addition,
-                        '-' => DiffLineType::Deletion,
-                        ' ' => DiffLineType::Context,
-                        '\\' => DiffLineType::NoNewlineWarning,
+                        '+' => LineType::Addition,
+                        '-' => LineType::Deletion,
+                        ' ' => LineType::Context,
+                        '\\' => LineType::NoNewlineEOF,
                         _ => unreachable!(),
                     };
 
@@ -114,14 +127,14 @@ impl<'repo> DiffGenerator<'repo> {
                         return false;
                     }
 
-                    let old_line_number = line.old_lineno();
-                    let new_line_number = line.new_lineno();
+                    let old_line_no = line.old_lineno().map(|n| n as usize);
+                    let new_line_no = line.new_lineno().map(|n| n as usize);
 
                     let diff_line = DiffLine {
-                        line_type,
                         content,
-                        old_line_number,
-                        new_line_number,
+                        line_type,
+                        old_line_no,
+                        new_line_no,
                     };
 
                     if let Some(last_hunk) = hunks.last_mut() {
