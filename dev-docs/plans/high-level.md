@@ -93,22 +93,6 @@ Build a terminal-based Git interface that replicates Magit's primary workflows: 
 - Clear indication of added/removed/modified lines
 - Return to status view seamlessly
 
-## Phase 4.5: Bulk Operations
-**Goal**: Enable bulk Git operations for efficient repository management
-
-**Key Problems to Solve**:
-- Stage all unstaged files with single command
-- Unstage all staged files with single command
-- Handle mixed operations (stage some, unstage others)
-- Provide progress feedback for multi-file operations
-- Handle failures in bulk operations gracefully
-
-**Success Criteria**:
-- Bulk operations work reliably across file types
-- Clear progress indication for large operations
-- Partial failure handling with detailed feedback
-- Integration with individual file operations
-
 ## Phase 5: Advanced Diff Features
 **Goal**: Add interactive diff manipulation matching Magit's capabilities
 
