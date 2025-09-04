@@ -46,3 +46,7 @@ This is "mahgit", a Rust-based terminal Git interface that aims to replicate Mag
 - `serde` - Configuration file support
 - `clap` - Command-line argument parsing
 
+## Claude guidelines
+
+Always plan first then stop.
+Never include weeks or similar estimates in plans.
