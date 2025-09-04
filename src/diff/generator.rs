@@ -162,6 +162,16 @@ impl<'repo> DiffGenerator<'repo> {
             )));
         }
 
+        // If no hunks were generated and this is a working tree comparison,
+        // check if it's an untracked file and generate synthetic diff
+        if hunks.is_empty() && matches!(context, DiffContext::WorkingTreeToIndex) {
+            if let Ok(synthetic_diff) =
+                self.generate_untracked_file_diff(file_path, context.clone())
+            {
+                return Ok(synthetic_diff);
+            }
+        }
+
         Ok(Diff {
             file_path: file_path.to_string(),
             context,
@@ -226,6 +236,95 @@ impl<'repo> DiffGenerator<'repo> {
         content.chars().any(|c| {
             // Check for control characters that might cause terminal issues
             c.is_control() && c != '\t' && c != '\n' && c != '\r'
+        })
+    }
+
+    fn generate_untracked_file_diff(
+        &self,
+        file_path: &str,
+        context: DiffContext,
+    ) -> Result<Diff, DiffError> {
+        use crate::diff::{HunkHeader, LineRange};
+        use std::fs;
+        use std::path::Path;
+
+        let repo_workdir = self.repo.workdir().ok_or_else(|| {
+            DiffError::Git(git2::Error::from_str("Repository has no working directory"))
+        })?;
+        let full_path = repo_workdir.join(file_path);
+
+        // Check if file exists in working tree but not in index (untracked)
+        if !full_path.exists() {
+            return Err(DiffError::FileNotFound(file_path.to_string()));
+        }
+
+        // Check if file exists in index
+        let index = self.repo.index()?;
+        if index.get_path(Path::new(file_path), 0).is_some() {
+            // File exists in index, so this isn't an untracked file
+            return Err(DiffError::FileNotFound(format!(
+                "File {} is not untracked",
+                file_path
+            )));
+        }
+
+        // Read file content
+        let file_content = fs::read_to_string(&full_path)?;
+
+        // Check for problematic characters
+        if Self::contains_problematic_chars(&file_content) {
+            return Err(DiffError::TerminalCompatibility(
+                "File contains problematic characters that may cause terminal issues".to_string(),
+            ));
+        }
+
+        let lines: Vec<&str> = file_content.lines().collect();
+        let line_count = lines.len();
+
+        // Check line count limit
+        if line_count > Self::MAX_LINES_PER_DIFF {
+            return Err(DiffError::TerminalCompatibility(format!(
+                "File too large ({} lines) - cannot display diff",
+                line_count
+            )));
+        }
+
+        // Create synthetic hunk showing entire file as additions
+        let header = HunkHeader {
+            raw: format!("@@ -0,0 +1,{} @@", line_count),
+            old_start: 0,
+            old_lines: 0,
+            new_start: 1,
+            new_lines: line_count as u32,
+        };
+
+        let mut diff_lines = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            diff_lines.push(crate::diff::DiffLine {
+                content: line.to_string(),
+                line_type: crate::diff::LineType::Addition,
+                old_line_no: None,
+                new_line_no: Some(i + 1),
+            });
+        }
+
+        let hunk = crate::diff::DiffHunk {
+            header,
+            lines: diff_lines,
+            old_range: LineRange { start: 0, count: 0 },
+            new_range: LineRange {
+                start: 1,
+                count: line_count as u32,
+            },
+            stageable: true,
+            context_lines: 3,
+        };
+
+        Ok(Diff {
+            file_path: file_path.to_string(),
+            context,
+            hunks: vec![hunk],
+            binary: false,
         })
     }
 }
@@ -335,5 +434,43 @@ mod tests {
             }
             _ => panic!("Expected file too large error"),
         }
+    }
+
+    #[test]
+    fn test_untracked_file_diff() {
+        let (temp_dir, repo) = setup_test_repo();
+        let file_path = temp_dir.path().join("untracked.txt");
+
+        // Create an untracked file (don't add to index)
+        std::fs::write(&file_path, "New file line 1\nNew file line 2\n").unwrap();
+
+        let generator = DiffGenerator::new(&repo);
+        let diff = generator
+            .generate_diff("untracked.txt", DiffContext::WorkingTreeToIndex)
+            .unwrap();
+
+        assert_eq!(diff.file_path, "untracked.txt");
+        assert_eq!(diff.context, DiffContext::WorkingTreeToIndex);
+        assert!(!diff.binary);
+        assert_eq!(diff.hunks.len(), 1);
+
+        let hunk = &diff.hunks[0];
+        assert_eq!(hunk.header.old_start, 0);
+        assert_eq!(hunk.header.old_lines, 0);
+        assert_eq!(hunk.header.new_start, 1);
+        assert_eq!(hunk.header.new_lines, 2);
+        assert_eq!(hunk.lines.len(), 2);
+
+        // Check that all lines are additions
+        for line in &hunk.lines {
+            assert_eq!(line.line_type, crate::diff::LineType::Addition);
+            assert_eq!(line.old_line_no, None);
+            assert!(line.new_line_no.is_some());
+        }
+
+        assert_eq!(hunk.lines[0].content, "New file line 1");
+        assert_eq!(hunk.lines[1].content, "New file line 2");
+        assert_eq!(hunk.lines[0].new_line_no, Some(1));
+        assert_eq!(hunk.lines[1].new_line_no, Some(2));
     }
 }

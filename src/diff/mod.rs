@@ -1,7 +1,9 @@
 pub mod generator;
+pub mod navigator;
 pub mod parser;
 
 pub use generator::DiffGenerator;
+pub use navigator::HunkNavigator;
 pub use parser::DiffParser;
 
 #[derive(Debug, Clone)]
@@ -58,4 +60,11 @@ pub enum LineType {
     Addition,
     Deletion,
     NoNewlineEOF,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct HunkPosition {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub screen_y: usize,
 }
