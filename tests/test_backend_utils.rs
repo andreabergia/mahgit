@@ -140,7 +140,7 @@ impl TestApp {
 }
 
 /// Helper function to convert buffer to string representation
-fn buffer_to_string(buffer: &Buffer) -> String {
+pub fn buffer_to_string(buffer: &Buffer) -> String {
     let mut result = String::new();
     for y in 0..buffer.area.height {
         for x in 0..buffer.area.width {

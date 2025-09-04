@@ -1,5 +1,6 @@
 use crate::diff::{Diff, DiffContext, DiffHunk, DiffLine, DiffLineType};
 use git2::{DiffOptions, Repository};
+use std::path::Path;
 
 pub struct DiffGenerator<'repo> {
     repo: &'repo Repository,
@@ -13,16 +14,25 @@ pub enum DiffError {
     FileNotFound(String),
     #[error("Binary file not supported for diff: {0}")]
     BinaryFile(String),
-    #[error("File too large: {0}")]
-    FileTooLarge(String),
+    #[error("File too large ({0} bytes): {1}")]
+    FileTooLarge(u64, String),
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Terminal compatibility issue: {0}")]
+    TerminalCompatibility(String),
 }
 
 impl<'repo> DiffGenerator<'repo> {
+    const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10 MB limit
+    const MAX_LINES_PER_DIFF: usize = 10000; // Limit lines for terminal performance
+
     pub fn new(repo: &'repo Repository) -> Self {
         Self { repo }
     }
 
     pub fn generate_diff(&self, file_path: &str, context: DiffContext) -> Result<Diff, DiffError> {
+        // Pre-check file size and binary status
+        self.check_file_constraints(file_path, &context)?;
         let mut diff_options = DiffOptions::new();
         diff_options.pathspec(file_path);
 
@@ -51,9 +61,15 @@ impl<'repo> DiffGenerator<'repo> {
         };
 
         let mut hunks = Vec::new();
-        let binary = false;
+        let mut binary = false;
+        let mut line_count = 0;
 
-        git_diff.print(git2::DiffFormat::Patch, |_delta, hunk, line| {
+        git_diff.print(git2::DiffFormat::Patch, |delta, hunk, line| {
+            // Check for binary files using delta flags
+            if delta.flags().contains(git2::DiffFlags::BINARY) {
+                binary = true;
+                return false; // Stop processing
+            }
             if let Some(hunk_data) = hunk {
                 let current_header = String::from_utf8_lossy(hunk_data.header()).to_string();
 
@@ -77,6 +93,12 @@ impl<'repo> DiffGenerator<'repo> {
             // Only process actual diff content lines (not headers or other metadata)
             match line.origin() {
                 '+' | '-' | ' ' | '\\' => {
+                    // Check line count limit for terminal performance
+                    line_count += 1;
+                    if line_count > Self::MAX_LINES_PER_DIFF {
+                        return false; // Stop processing to prevent terminal overflow
+                    }
+
                     let line_type = match line.origin() {
                         '+' => DiffLineType::Addition,
                         '-' => DiffLineType::Deletion,
@@ -86,6 +108,12 @@ impl<'repo> DiffGenerator<'repo> {
                     };
 
                     let content = String::from_utf8_lossy(line.content()).to_string();
+
+                    // Check for terminal compatibility issues (non-printable characters)
+                    if Self::contains_problematic_chars(&content) {
+                        return false;
+                    }
+
                     let old_line_number = line.old_lineno();
                     let new_line_number = line.new_lineno();
 
@@ -112,11 +140,79 @@ impl<'repo> DiffGenerator<'repo> {
             return Err(DiffError::BinaryFile(file_path.to_string()));
         }
 
+        // Check if diff was truncated due to line limits
+        if line_count > Self::MAX_LINES_PER_DIFF {
+            return Err(DiffError::TerminalCompatibility(format!(
+                "Diff truncated - {} has too many changes (>{} lines)",
+                file_path,
+                Self::MAX_LINES_PER_DIFF
+            )));
+        }
+
         Ok(Diff {
             file_path: file_path.to_string(),
             context,
             hunks,
             binary,
+        })
+    }
+
+    fn check_file_constraints(
+        &self,
+        file_path: &str,
+        context: &DiffContext,
+    ) -> Result<(), DiffError> {
+        // For working tree comparisons, check actual file size
+        if matches!(
+            context,
+            DiffContext::WorkingTreeToIndex | DiffContext::WorkingTreeToHead
+        ) {
+            let repo_workdir = self.repo.workdir().ok_or_else(|| {
+                DiffError::Git(git2::Error::from_str("Repository has no working directory"))
+            })?;
+            let full_path = repo_workdir.join(file_path);
+
+            if full_path.exists() {
+                let metadata = std::fs::metadata(&full_path)?;
+                let file_size = metadata.len();
+
+                if file_size > Self::MAX_FILE_SIZE {
+                    return Err(DiffError::FileTooLarge(file_size, file_path.to_string()));
+                }
+
+                // Check if file appears to be binary by examining first few bytes
+                if self.is_likely_binary_file(&full_path)? {
+                    return Err(DiffError::BinaryFile(file_path.to_string()));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn is_likely_binary_file(&self, path: &Path) -> Result<bool, DiffError> {
+        use std::fs::File;
+        use std::io::Read;
+
+        let mut file = File::open(path)?;
+        let mut buffer = [0; 512]; // Check first 512 bytes
+        let bytes_read = file.read(&mut buffer)?;
+
+        // Check for null bytes or high percentage of non-ASCII characters
+        let null_count = buffer[..bytes_read].iter().filter(|&&b| b == 0).count();
+        let non_ascii_count = buffer[..bytes_read]
+            .iter()
+            .filter(|&&b| b > 127 || (b < 32 && b != 9 && b != 10 && b != 13))
+            .count();
+
+        // Consider binary if more than 1% null bytes or more than 30% non-ASCII
+        Ok(null_count > bytes_read / 100 || non_ascii_count > bytes_read * 30 / 100)
+    }
+
+    fn contains_problematic_chars(content: &str) -> bool {
+        content.chars().any(|c| {
+            // Check for control characters that might cause terminal issues
+            c.is_control() && c != '\t' && c != '\n' && c != '\r'
         })
     }
 }
@@ -182,5 +278,49 @@ mod tests {
         assert_eq!(diff.context, DiffContext::WorkingTreeToIndex);
         assert!(!diff.binary);
         assert!(!diff.hunks.is_empty());
+    }
+
+    #[test]
+    fn test_binary_file_detection() {
+        let (temp_dir, repo) = setup_test_repo();
+        let file_path = temp_dir.path().join("binary.bin");
+
+        // Create a binary file with null bytes
+        let binary_data = vec![0u8, 1u8, 2u8, 0u8, 255u8];
+        std::fs::write(&file_path, binary_data).unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("binary.bin")).unwrap();
+        index.write().unwrap();
+
+        let generator = DiffGenerator::new(&repo);
+        let result = generator.generate_diff("binary.bin", DiffContext::WorkingTreeToIndex);
+
+        match result {
+            Err(DiffError::BinaryFile(_)) => {
+                // Expected
+            }
+            _ => panic!("Expected binary file error"),
+        }
+    }
+
+    #[test]
+    fn test_file_size_limit() {
+        let (temp_dir, repo) = setup_test_repo();
+        let file_path = temp_dir.path().join("large.txt");
+
+        // Create a large file exceeding the limit (but still text)
+        let large_content = "a".repeat((DiffGenerator::MAX_FILE_SIZE + 1000) as usize);
+        std::fs::write(&file_path, large_content).unwrap();
+
+        let generator = DiffGenerator::new(&repo);
+        let result = generator.generate_diff("large.txt", DiffContext::WorkingTreeToIndex);
+
+        match result {
+            Err(DiffError::FileTooLarge(size, _)) => {
+                assert!(size > DiffGenerator::MAX_FILE_SIZE);
+            }
+            _ => panic!("Expected file too large error"),
+        }
     }
 }

@@ -310,11 +310,33 @@ impl App {
                     });
                 }
                 Err(err) => {
-                    self.feedback_manager
-                        .show_result(crate::operations::OperationResult::new(format!(
-                            "Failed to generate diff for {}: {}",
-                            selected_file.path, err
-                        )));
+                    // For certain recoverable errors, show the error in diff view instead of feedback
+                    match &err {
+                        crate::diff::generator::DiffError::BinaryFile(_)
+                        | crate::diff::generator::DiffError::FileTooLarge(_, _)
+                        | crate::diff::generator::DiffError::TerminalCompatibility(_) => {
+                            self.diff_view =
+                                Some(RefCell::new(diff_view::DiffView::new_with_error(
+                                    selected_file.path.clone(),
+                                    err,
+                                )));
+                            self.current_view = ViewType::Diff(DiffViewState {
+                                file_path: selected_file.path.clone(),
+                                diff_context,
+                                scroll_position: 0,
+                                hunk_index: None,
+                            });
+                        }
+                        _ => {
+                            // For other errors, show in feedback
+                            self.feedback_manager.show_result(
+                                crate::operations::OperationResult::new(format!(
+                                    "Failed to generate diff for {}: {}",
+                                    selected_file.path, err
+                                )),
+                            );
+                        }
+                    }
                 }
             }
         }

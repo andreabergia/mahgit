@@ -1,3 +1,4 @@
+use crate::diff::generator::DiffError;
 use crate::diff::{Diff, DiffLine, DiffLineType};
 use ratatui::{
     Frame,
@@ -7,8 +8,13 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
+pub enum DiffViewContent {
+    Success(Diff),
+    Error { file_path: String, error: DiffError },
+}
+
 pub struct DiffView {
-    diff: Diff,
+    content: DiffViewContent,
     scroll_position: usize,
     viewport_height: usize,
 }
@@ -16,27 +22,39 @@ pub struct DiffView {
 impl DiffView {
     pub fn new(diff: Diff) -> Self {
         Self {
-            diff,
+            content: DiffViewContent::Success(diff),
+            scroll_position: 0,
+            viewport_height: 0,
+        }
+    }
+
+    pub fn new_with_error(file_path: String, error: DiffError) -> Self {
+        Self {
+            content: DiffViewContent::Error { file_path, error },
             scroll_position: 0,
             viewport_height: 0,
         }
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        // Handle binary files
-        if self.diff.binary {
-            self.render_binary_message(frame, area);
-            return;
+        match &self.content {
+            DiffViewContent::Success(diff) => {
+                if diff.binary {
+                    self.render_binary_message(frame, area, &diff.file_path);
+                } else {
+                    self.render_diff_content(frame, area, diff);
+                }
+            }
+            DiffViewContent::Error { file_path, error } => {
+                self.render_error_message(frame, area, file_path, error);
+            }
         }
-
-        // Render diff content
-        self.render_diff_content(frame, area);
     }
 
-    fn render_binary_message(&self, frame: &mut Frame, area: Rect) {
+    fn render_binary_message(&self, frame: &mut Frame, area: Rect, file_path: &str) {
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" {} (binary) ", self.diff.file_path));
+            .title(format!(" {} (binary) ", file_path));
 
         let text = Text::from(vec![Line::from(Span::styled(
             "Binary file - cannot display diff",
@@ -47,11 +65,49 @@ impl DiffView {
         frame.render_widget(paragraph, area);
     }
 
-    fn render_diff_content(&self, frame: &mut Frame, area: Rect) {
+    fn render_error_message(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        file_path: &str,
+        error: &DiffError,
+    ) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" {} (error) ", file_path));
+
+        let (message, color) = match error {
+            DiffError::BinaryFile(_) => (
+                "Binary file - cannot display diff".to_string(),
+                Color::Yellow,
+            ),
+            DiffError::FileTooLarge(size, _) => (
+                format!("File too large ({} bytes) - cannot display diff", size),
+                Color::Red,
+            ),
+            DiffError::TerminalCompatibility(msg) => (
+                format!("Terminal compatibility issue: {}", msg),
+                Color::Magenta,
+            ),
+            DiffError::FileNotFound(_) => ("File not found".to_string(), Color::Red),
+            DiffError::Git(git_err) => (format!("Git error: {}", git_err), Color::Red),
+            DiffError::Io(io_err) => (format!("I/O error: {}", io_err), Color::Red),
+        };
+
+        let text = Text::from(vec![Line::from(Span::styled(
+            message,
+            Style::default().fg(color),
+        ))]);
+
+        let paragraph = Paragraph::new(text).block(block);
+        frame.render_widget(paragraph, area);
+    }
+
+    fn render_diff_content(&self, frame: &mut Frame, area: Rect, diff: &Diff) {
         // Create block with title
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" {} ", self.diff.file_path));
+            .title(format!(" {} ", diff.file_path));
 
         // Calculate viewport height
         let viewport_height = area.height.saturating_sub(2) as usize; // Account for borders
@@ -60,7 +116,7 @@ impl DiffView {
         let _inner_area = block.inner(area);
 
         // Generate diff lines for display
-        let diff_lines = self.generate_diff_lines();
+        let diff_lines = self.generate_diff_lines(diff);
         let total_lines = diff_lines.len();
 
         // Calculate visible range
@@ -80,10 +136,10 @@ impl DiffView {
         }
     }
 
-    fn generate_diff_lines(&self) -> Vec<Line<'static>> {
+    fn generate_diff_lines(&self, diff: &Diff) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
 
-        for hunk in &self.diff.hunks {
+        for hunk in &diff.hunks {
             // Add hunk header
             lines.push(Line::from(Span::styled(
                 hunk.header.clone(),
@@ -158,38 +214,42 @@ impl DiffView {
     }
 
     pub fn jump_to_next_hunk(&mut self) {
-        let current_line = self.scroll_position;
-        let mut line_count = 0;
+        if let DiffViewContent::Success(diff) = &self.content {
+            let current_line = self.scroll_position;
+            let mut line_count = 0;
 
-        for hunk in &self.diff.hunks {
-            // Each hunk starts with a header line
-            if line_count > current_line {
-                self.scroll_position = line_count;
-                return;
+            for hunk in &diff.hunks {
+                // Each hunk starts with a header line
+                if line_count > current_line {
+                    self.scroll_position = line_count;
+                    return;
+                }
+                line_count += 1; // Header line
+                line_count += hunk.lines.len(); // Diff lines
             }
-            line_count += 1; // Header line
-            line_count += hunk.lines.len(); // Diff lines
         }
     }
 
     pub fn jump_to_previous_hunk(&mut self) {
-        let current_line = self.scroll_position;
-        let mut line_count = 0;
-        let mut last_hunk_start = 0;
+        if let DiffViewContent::Success(diff) = &self.content {
+            let current_line = self.scroll_position;
+            let mut line_count = 0;
+            let mut last_hunk_start = 0;
 
-        for hunk in &self.diff.hunks {
-            if line_count >= current_line && last_hunk_start < current_line {
-                self.scroll_position = last_hunk_start;
-                return;
+            for hunk in &diff.hunks {
+                if line_count >= current_line && last_hunk_start < current_line {
+                    self.scroll_position = last_hunk_start;
+                    return;
+                }
+                last_hunk_start = line_count;
+                line_count += 1; // Header line
+                line_count += hunk.lines.len(); // Diff lines
             }
-            last_hunk_start = line_count;
-            line_count += 1; // Header line
-            line_count += hunk.lines.len(); // Diff lines
-        }
 
-        // If we're at or past the last hunk, go to the first hunk
-        if current_line > 0 {
-            self.scroll_position = 0;
+            // If we're at or past the last hunk, go to the first hunk
+            if current_line > 0 {
+                self.scroll_position = 0;
+            }
         }
     }
 
@@ -212,11 +272,15 @@ impl DiffView {
     }
 
     fn get_total_lines(&self) -> usize {
-        self.diff
-            .hunks
-            .iter()
-            .map(|hunk| 1 + hunk.lines.len()) // 1 for header + lines
-            .sum()
+        match &self.content {
+            DiffViewContent::Success(diff) => {
+                diff.hunks
+                    .iter()
+                    .map(|hunk| 1 + hunk.lines.len()) // 1 for header + lines
+                    .sum()
+            }
+            DiffViewContent::Error { .. } => 0,
+        }
     }
 }
 
@@ -293,7 +357,10 @@ mod tests {
         let mut diff = create_test_diff();
         diff.binary = true;
         let diff_view = DiffView::new(diff);
-        assert!(diff_view.diff.binary);
+        match &diff_view.content {
+            DiffViewContent::Success(diff) => assert!(diff.binary),
+            _ => panic!("Expected successful diff content"),
+        }
     }
 
     #[test]
