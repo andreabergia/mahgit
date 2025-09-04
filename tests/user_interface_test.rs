@@ -169,43 +169,43 @@ fn test_error_handling_outside_repo() {
 }
 
 /// Test error handling for binary files
-#[test] 
+#[test]
 fn test_binary_file_error_handling() {
     use crossterm::event::KeyCode;
-    
+
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
-    
+
     env::set_current_dir(test_repo.temp_dir.path()).unwrap();
-    
+
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
     test_app.render().unwrap();
     let binary_file = "test_binary.bin";
     let binary_data = vec![0u8, 1u8, 2u8, 0u8, 255u8, 127u8]; // Binary content with null bytes
     std::fs::write(test_repo.temp_dir.path().join(binary_file), binary_data).unwrap();
-    
+
     // Refresh to see the new file
     test_app.refresh().unwrap();
     test_app.render().unwrap();
-    
+
     // Verify the binary file appears in the status
     assert!(
         test_app.assert_contains(binary_file),
         "Binary file should appear in status"
     );
-    
+
     // Try to enter diff view (Tab key will try to diff the first available file)
     test_app.send_key_code(KeyCode::Tab);
     test_app.render().unwrap();
-    
+
     // Should show binary file message in diff view
     let buffer_content = test_backend_utils::buffer_to_string(test_app.get_buffer());
-    let has_binary_message = buffer_content.contains("Binary file") || 
-                            buffer_content.contains("cannot display diff");
-    
+    let has_binary_message =
+        buffer_content.contains("Binary file") || buffer_content.contains("cannot display diff");
+
     assert!(
         has_binary_message,
-        "Should show binary file error message. Buffer content: {}", 
+        "Should show binary file error message. Buffer content: {}",
         buffer_content
     );
 }
@@ -214,41 +214,41 @@ fn test_binary_file_error_handling() {
 #[test]
 fn test_large_file_error_handling() {
     use crossterm::event::KeyCode;
-    
+
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
-    
+
     env::set_current_dir(test_repo.temp_dir.path()).unwrap();
-    
+
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
     test_app.render().unwrap();
-    
+
     let large_file = "test_large.txt";
     let large_content = "a".repeat(11 * 1024 * 1024); // 11MB file (exceeds 10MB limit)
     std::fs::write(test_repo.temp_dir.path().join(large_file), large_content).unwrap();
-    
+
     // Refresh to see the large file
     test_app.refresh().unwrap();
     test_app.render().unwrap();
-    
+
     // Verify the large file appears
     assert!(
         test_app.assert_contains(large_file),
         "Large file should appear in status"
     );
-    
+
     // Try to view diff of large file
     test_app.send_key_code(KeyCode::Tab);
     test_app.render().unwrap();
-    
+
     // Should show file too large error message
     let buffer_content = test_backend_utils::buffer_to_string(test_app.get_buffer());
-    let has_large_file_message = buffer_content.contains("too large") || 
-                                buffer_content.contains("File too large");
-    
+    let has_large_file_message =
+        buffer_content.contains("too large") || buffer_content.contains("File too large");
+
     assert!(
         has_large_file_message,
-        "Should show file too large error message. Buffer content: {}", 
+        "Should show file too large error message. Buffer content: {}",
         buffer_content
     );
 }
@@ -257,42 +257,42 @@ fn test_large_file_error_handling() {
 #[test]
 fn test_normal_file_diff_works() {
     use crossterm::event::KeyCode;
-    
+
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
-    
+
     env::set_current_dir(test_repo.temp_dir.path()).unwrap();
-    
+
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
     test_app.render().unwrap();
-    
+
     let normal_file = "test_normal.txt";
     let normal_content = "Hello\nWorld\nThis is a normal text file\n";
     std::fs::write(test_repo.temp_dir.path().join(normal_file), normal_content).unwrap();
-    
+
     // Refresh to see the normal file
     test_app.refresh().unwrap();
     test_app.render().unwrap();
-    
+
     // Verify the normal file appears
     assert!(
         test_app.assert_contains(normal_file),
         "Normal file should appear in status"
     );
-    
+
     // Try to view diff of normal file - should work without errors
     test_app.send_key_code(KeyCode::Tab);
     test_app.render().unwrap();
-    
+
     // Should not show error messages
     let buffer_content = test_backend_utils::buffer_to_string(test_app.get_buffer());
-    let has_error_message = buffer_content.contains("Binary file") || 
-                           buffer_content.contains("too large") ||
-                           buffer_content.contains("(error)");
-    
+    let has_error_message = buffer_content.contains("Binary file")
+        || buffer_content.contains("too large")
+        || buffer_content.contains("(error)");
+
     assert!(
         !has_error_message,
-        "Normal file diff should not show error messages. Buffer content: {}", 
+        "Normal file diff should not show error messages. Buffer content: {}",
         buffer_content
     );
 }

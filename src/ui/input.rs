@@ -31,6 +31,8 @@ pub enum Command {
     PageDiffDown,
     JumpToNextHunk,
     JumpToPreviousHunk,
+    NextHunk,
+    PreviousHunk,
     GoToTopOfDiff,
     GoToBottomOfDiff,
 
@@ -72,6 +74,22 @@ impl InputHandler {
             } => {
                 self.clear_sequence_state();
                 Command::MoveUp
+            }
+
+            KeyEvent {
+                code: KeyCode::Left,
+                ..
+            } => {
+                self.clear_sequence_state();
+                Command::PreviousHunk
+            }
+
+            KeyEvent {
+                code: KeyCode::Right,
+                ..
+            } => {
+                self.clear_sequence_state();
+                Command::NextHunk
             }
 
             KeyEvent {
@@ -226,8 +244,8 @@ impl InputHandler {
             "  Tab     Toggle diff view",
             "  f/PgDn  Page down in diff",
             "  b/PgUp  Page up in diff",
-            "  n       Jump to next hunk",
-            "  p       Jump to previous hunk",
+            "  n/→     Jump to next hunk",
+            "  p/←     Jump to previous hunk",
             "",
             "File Operations:",
             "  s       Stage file",
@@ -427,5 +445,47 @@ mod tests {
         assert!(!help_text.is_empty());
         assert!(help_text.iter().any(|line| line.contains("?")));
         assert!(help_text.iter().any(|line| line.contains("Show this help")));
+    }
+
+    #[test]
+    fn test_arrow_key_navigation() {
+        let mut handler = InputHandler::new();
+
+        let left_arrow = KeyEvent {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(left_arrow), Command::PreviousHunk);
+
+        let right_arrow = KeyEvent {
+            code: KeyCode::Right,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(right_arrow), Command::NextHunk);
+    }
+
+    #[test]
+    fn test_existing_hunk_navigation_keys() {
+        let mut handler = InputHandler::new();
+
+        let n_key = KeyEvent {
+            code: KeyCode::Char('n'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(n_key), Command::JumpToNextHunk);
+
+        let p_key = KeyEvent {
+            code: KeyCode::Char('p'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(p_key), Command::JumpToPreviousHunk);
     }
 }

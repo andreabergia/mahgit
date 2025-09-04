@@ -17,14 +17,17 @@ pub struct DiffView {
     content: DiffViewContent,
     scroll_position: usize,
     viewport_height: usize,
+    current_hunk_index: Option<usize>,
 }
 
 impl DiffView {
     pub fn new(diff: Diff) -> Self {
+        let current_hunk_index = if diff.hunks.is_empty() { None } else { Some(0) };
         Self {
             content: DiffViewContent::Success(diff),
             scroll_position: 0,
             viewport_height: 0,
+            current_hunk_index,
         }
     }
 
@@ -33,6 +36,7 @@ impl DiffView {
             content: DiffViewContent::Error { file_path, error },
             scroll_position: 0,
             viewport_height: 0,
+            current_hunk_index: None,
         }
     }
 
@@ -139,12 +143,18 @@ impl DiffView {
     fn generate_diff_lines(&self, diff: &Diff) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
 
-        for hunk in &diff.hunks {
-            // Add hunk header
-            lines.push(Line::from(Span::styled(
-                hunk.header.clone(),
-                Style::default().fg(Color::Cyan),
-            )));
+        for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
+            // Determine if this is the current hunk
+            let is_current_hunk = self.current_hunk_index == Some(hunk_index);
+
+            // Add hunk header with highlighting if current
+            let header_style = if is_current_hunk {
+                Style::default().fg(Color::Cyan).bg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::Cyan)
+            };
+
+            lines.push(Line::from(Span::styled(hunk.header.clone(), header_style)));
 
             // Add diff lines
             for diff_line in &hunk.lines {
@@ -215,40 +225,61 @@ impl DiffView {
 
     pub fn jump_to_next_hunk(&mut self) {
         if let DiffViewContent::Success(diff) = &self.content {
+            if diff.hunks.is_empty() {
+                return;
+            }
+
+            // Find next hunk based on current scroll position
             let current_line = self.scroll_position;
             let mut line_count = 0;
+            let mut found_current = false;
 
-            for hunk in &diff.hunks {
-                // Each hunk starts with a header line
-                if line_count > current_line {
+            for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
+                if line_count > current_line && !found_current {
+                    self.current_hunk_index = Some(hunk_index);
                     self.scroll_position = line_count;
                     return;
                 }
-                line_count += 1; // Header line
-                line_count += hunk.lines.len(); // Diff lines
+                if line_count >= current_line {
+                    found_current = true;
+                }
+                line_count += 1 + hunk.lines.len(); // Header + lines
+            }
+
+            // If no next hunk found, go to first hunk
+            if found_current {
+                self.current_hunk_index = Some(0);
+                self.scroll_position = 0;
             }
         }
     }
 
     pub fn jump_to_previous_hunk(&mut self) {
         if let DiffViewContent::Success(diff) = &self.content {
+            if diff.hunks.is_empty() {
+                return;
+            }
+
             let current_line = self.scroll_position;
             let mut line_count = 0;
             let mut last_hunk_start = 0;
+            let mut last_hunk_index = 0;
 
-            for hunk in &diff.hunks {
+            for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
                 if line_count >= current_line && last_hunk_start < current_line {
+                    self.current_hunk_index = Some(last_hunk_index);
                     self.scroll_position = last_hunk_start;
                     return;
                 }
                 last_hunk_start = line_count;
-                line_count += 1; // Header line
-                line_count += hunk.lines.len(); // Diff lines
+                last_hunk_index = hunk_index;
+                line_count += 1 + hunk.lines.len(); // Header + lines
             }
 
-            // If we're at or past the last hunk, go to the first hunk
+            // If we're at or past the last hunk, go to the last hunk
             if current_line > 0 {
-                self.scroll_position = 0;
+                self.current_hunk_index = Some(diff.hunks.len() - 1);
+                self.scroll_position = last_hunk_start;
             }
         }
     }
@@ -280,6 +311,79 @@ impl DiffView {
                     .sum()
             }
             DiffViewContent::Error { .. } => 0,
+        }
+    }
+
+    pub fn get_hunk_count(&self) -> usize {
+        match &self.content {
+            DiffViewContent::Success(diff) => diff.hunks.len(),
+            DiffViewContent::Error { .. } => 0,
+        }
+    }
+
+    pub fn get_current_hunk_index(&self) -> Option<usize> {
+        self.current_hunk_index
+    }
+
+    pub fn navigate_to_next_hunk(&mut self) {
+        if let DiffViewContent::Success(diff) = &self.content {
+            if diff.hunks.is_empty() {
+                return;
+            }
+
+            match self.current_hunk_index {
+                Some(current) => {
+                    let next_index = (current + 1) % diff.hunks.len();
+                    self.current_hunk_index = Some(next_index);
+                    self.scroll_to_hunk(next_index);
+                }
+                None => {
+                    self.current_hunk_index = Some(0);
+                    self.scroll_to_hunk(0);
+                }
+            }
+        }
+    }
+
+    pub fn navigate_to_previous_hunk(&mut self) {
+        if let DiffViewContent::Success(diff) = &self.content {
+            if diff.hunks.is_empty() {
+                return;
+            }
+
+            match self.current_hunk_index {
+                Some(current) => {
+                    let prev_index = if current == 0 {
+                        diff.hunks.len() - 1
+                    } else {
+                        current - 1
+                    };
+                    self.current_hunk_index = Some(prev_index);
+                    self.scroll_to_hunk(prev_index);
+                }
+                None => {
+                    let last_index = diff.hunks.len() - 1;
+                    self.current_hunk_index = Some(last_index);
+                    self.scroll_to_hunk(last_index);
+                }
+            }
+        }
+    }
+
+    fn scroll_to_hunk(&mut self, hunk_index: usize) {
+        if let DiffViewContent::Success(diff) = &self.content {
+            if hunk_index >= diff.hunks.len() {
+                return;
+            }
+
+            let mut line_count = 0;
+            for (i, hunk) in diff.hunks.iter().enumerate() {
+                if i == hunk_index {
+                    self.scroll_position = line_count;
+                    return;
+                }
+                line_count += 1 + hunk.lines.len(); // 1 for header + lines
+            }
         }
     }
 }
@@ -379,5 +483,127 @@ mod tests {
         // Jump to previous hunk should not move
         diff_view.jump_to_previous_hunk();
         assert_eq!(diff_view.scroll_position, 0);
+    }
+
+    #[test]
+    fn test_arrow_key_navigation() {
+        let diff = create_test_diff();
+        let mut diff_view = DiffView::new(diff);
+        diff_view.viewport_height = 10;
+
+        // Should start with first hunk selected
+        assert_eq!(diff_view.current_hunk_index, Some(0));
+        assert_eq!(diff_view.scroll_position, 0);
+
+        // Navigate to next hunk (wraps around since only one hunk)
+        diff_view.navigate_to_next_hunk();
+        assert_eq!(diff_view.current_hunk_index, Some(0));
+        assert_eq!(diff_view.scroll_position, 0);
+
+        // Navigate to previous hunk (wraps around since only one hunk)
+        diff_view.navigate_to_previous_hunk();
+        assert_eq!(diff_view.current_hunk_index, Some(0));
+        assert_eq!(diff_view.scroll_position, 0);
+    }
+
+    fn create_multi_hunk_diff() -> Diff {
+        let hunk1 = DiffHunk {
+            header: "@@ -1,3 +1,4 @@".to_string(),
+            old_start: 1,
+            old_lines: 3,
+            new_start: 1,
+            new_lines: 4,
+            lines: vec![
+                DiffLine {
+                    line_type: DiffLineType::Context,
+                    content: "line 1".to_string(),
+                    old_line_number: Some(1),
+                    new_line_number: Some(1),
+                },
+                DiffLine {
+                    line_type: DiffLineType::Deletion,
+                    content: "old line".to_string(),
+                    old_line_number: Some(2),
+                    new_line_number: None,
+                },
+            ],
+        };
+
+        let hunk2 = DiffHunk {
+            header: "@@ -10,2 +11,3 @@".to_string(),
+            old_start: 10,
+            old_lines: 2,
+            new_start: 11,
+            new_lines: 3,
+            lines: vec![
+                DiffLine {
+                    line_type: DiffLineType::Context,
+                    content: "line 10".to_string(),
+                    old_line_number: Some(10),
+                    new_line_number: Some(11),
+                },
+                DiffLine {
+                    line_type: DiffLineType::Addition,
+                    content: "new line".to_string(),
+                    old_line_number: None,
+                    new_line_number: Some(12),
+                },
+            ],
+        };
+
+        Diff {
+            file_path: "test.txt".to_string(),
+            context: DiffContext::WorkingTreeToIndex,
+            hunks: vec![hunk1, hunk2],
+            binary: false,
+        }
+    }
+
+    #[test]
+    fn test_multi_hunk_navigation() {
+        let diff = create_multi_hunk_diff();
+        let mut diff_view = DiffView::new(diff);
+        diff_view.viewport_height = 10;
+
+        // Should start with first hunk selected
+        assert_eq!(diff_view.current_hunk_index, Some(0));
+        assert_eq!(diff_view.scroll_position, 0);
+
+        // Navigate to next hunk
+        diff_view.navigate_to_next_hunk();
+        assert_eq!(diff_view.current_hunk_index, Some(1));
+        // Should scroll to second hunk (1 header + 2 lines = 3 lines offset)
+        assert_eq!(diff_view.scroll_position, 3);
+
+        // Navigate to next hunk (should wrap to first)
+        diff_view.navigate_to_next_hunk();
+        assert_eq!(diff_view.current_hunk_index, Some(0));
+        assert_eq!(diff_view.scroll_position, 0);
+
+        // Navigate to previous hunk (should wrap to last)
+        diff_view.navigate_to_previous_hunk();
+        assert_eq!(diff_view.current_hunk_index, Some(1));
+        assert_eq!(diff_view.scroll_position, 3);
+    }
+
+    #[test]
+    fn test_hunk_count() {
+        let single_hunk_diff = create_test_diff();
+        let single_hunk_view = DiffView::new(single_hunk_diff);
+        assert_eq!(single_hunk_view.get_hunk_count(), 1);
+
+        let multi_hunk_diff = create_multi_hunk_diff();
+        let multi_hunk_view = DiffView::new(multi_hunk_diff);
+        assert_eq!(multi_hunk_view.get_hunk_count(), 2);
+
+        let empty_diff = Diff {
+            file_path: "empty.txt".to_string(),
+            context: DiffContext::WorkingTreeToIndex,
+            hunks: vec![],
+            binary: false,
+        };
+        let empty_view = DiffView::new(empty_diff);
+        assert_eq!(empty_view.get_hunk_count(), 0);
+        assert_eq!(empty_view.get_current_hunk_index(), None);
     }
 }

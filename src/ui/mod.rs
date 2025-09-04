@@ -191,6 +191,12 @@ impl App {
             Command::JumpToPreviousHunk => {
                 self.jump_to_previous_hunk();
             }
+            Command::NextHunk => {
+                self.navigate_to_next_hunk();
+            }
+            Command::PreviousHunk => {
+                self.navigate_to_previous_hunk();
+            }
             Command::GoToTopOfDiff => {
                 self.go_to_top_of_diff();
             }
@@ -513,6 +519,20 @@ impl App {
         if let Some(diff_view_cell) = &self.diff_view {
             let mut diff_view = diff_view_cell.borrow_mut();
             diff_view.jump_to_previous_hunk();
+        }
+    }
+
+    fn navigate_to_next_hunk(&mut self) {
+        if let Some(diff_view_cell) = &self.diff_view {
+            let mut diff_view = diff_view_cell.borrow_mut();
+            diff_view.navigate_to_next_hunk();
+        }
+    }
+
+    fn navigate_to_previous_hunk(&mut self) {
+        if let Some(diff_view_cell) = &self.diff_view {
+            let mut diff_view = diff_view_cell.borrow_mut();
+            diff_view.navigate_to_previous_hunk();
         }
     }
 
