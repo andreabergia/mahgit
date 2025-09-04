@@ -200,29 +200,39 @@ impl HunkStager {
 - ✅ Visual feedback clearly indicates current position (via existing diff_view)
 - ✅ Navigation works correctly with various diff sizes
 
-### Phase 5c: Staging Operations
+### Phase 5c: Staging Operations ✅ **FOUNDATION COMPLETED**
 **Goal**: Enable staging/unstaging individual hunks
 
 **Tasks**:
-1. **Patch Generation**:
-   - Create Git patches from individual hunks
-   - Handle context line requirements for clean application
-   - Generate reverse patches for unstaging operations
+1. **Patch Generation**: ✅ **COMPLETED**
+   - ✅ Create Git patches from individual hunks
+   - ✅ Handle context line requirements for clean application
+   - ✅ Generate reverse patches for unstaging operations
 
-2. **Git Integration**:
-   - Use git2's apply APIs for precise staging
+2. **Git Integration**: 🔄 **RESEARCH NEEDED**
+   - Research git2's index manipulation for hunk-level staging
+   - Implement proper patch application without using deprecated APIs
    - Handle staging conflicts and error cases
    - Ensure atomic operations (success or rollback)
 
-3. **State Management**:
+3. **State Management**: ⏸️ **PENDING**
    - Refresh diff view after operations
    - Update parent status view to reflect changes
    - Maintain navigation position after operations
 
+**Progress Notes**:
+- ✅ Implemented `HunkStager` with patch generation capabilities
+- ✅ Created comprehensive test suite for patch generation logic
+- ✅ Added proper error handling for non-stageable hunks
+- 🔄 Discovered git2::Patch::from_buffer doesn't exist - need alternative approach
+- 🔄 Implementation currently uses placeholder logic pending proper git2 integration
+- 📝 Note: Full git2 patch application requires more research into index manipulation APIs
+
 **Success Criteria**:
-- Stage/unstage individual hunks reliably
-- Operations integrate cleanly with existing file operations
-- No corruption of repository state during operations
+- ✅ Generate patches for individual hunks correctly
+- ⏸️ Stage/unstage individual hunks reliably (pending proper git2 implementation)
+- ⏸️ Operations integrate cleanly with existing file operations
+- ⏸️ No corruption of repository state during operations
 
 ### Phase 5d: Advanced Scenarios
 **Goal**: Handle complex Git scenarios gracefully

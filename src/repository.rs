@@ -7,6 +7,8 @@ pub enum RepositoryError {
     NotARepository,
     Corrupted(String),
     AccessDenied,
+    GitError(git2::Error),
+    IoError(std::io::Error),
     Other(String),
 }
 
@@ -17,6 +19,8 @@ impl std::fmt::Display for RepositoryError {
             RepositoryError::NotARepository => write!(f, "Not a Git repository"),
             RepositoryError::Corrupted(msg) => write!(f, "Repository corrupted: {}", msg),
             RepositoryError::AccessDenied => write!(f, "Access denied to repository"),
+            RepositoryError::GitError(e) => write!(f, "Git error: {}", e),
+            RepositoryError::IoError(e) => write!(f, "IO error: {}", e),
             RepositoryError::Other(msg) => write!(f, "Repository error: {}", msg),
         }
     }
@@ -135,5 +139,14 @@ mod tests {
             RepositoryError::Other("custom error".to_string()).to_string(),
             "Repository error: custom error"
         );
+
+        // Test GitError and IoError variants are handled (without specific messages)
+        let git_error = git2::Error::from_str("test git error");
+        let repo_error = RepositoryError::GitError(git_error);
+        assert!(repo_error.to_string().contains("Git error"));
+
+        let io_error = std::io::Error::new(std::io::ErrorKind::Other, "test io error");
+        let repo_error = RepositoryError::IoError(io_error);
+        assert!(repo_error.to_string().contains("IO error"));
     }
 }
