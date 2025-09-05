@@ -215,10 +215,10 @@ impl HunkStager {
    - ✅ Added robust error handling for staging conflicts and git command failures
    - ✅ Implemented both staging and unstaging operations with atomic behavior
 
-3. **State Management**: ⏸️ **PENDING**
-   - Refresh diff view after operations
-   - Update parent status view to reflect changes
-   - Maintain navigation position after operations
+3. **State Management**: ✅ **COMPLETED**
+   - ✅ Refresh diff view after operations  
+   - ✅ Update parent status view to reflect changes
+   - ✅ Maintain navigation position after operations
 
 **Progress Notes**:
 - ✅ Implemented `HunkStager` with comprehensive patch generation capabilities
@@ -227,6 +227,11 @@ impl HunkStager {
 - ✅ Implemented reliable git subprocess integration using `git apply --cached`
 - ✅ Added 3 new integration tests: hunk staging, hunk unstaging, and non-stageable hunk validation
 - ✅ Full implementation complete with proper git2 integration and atomic operations
+- ✅ **PHASE 5c COMPLETE**: Integrated hunk staging with UI layer including:
+  - ✅ Added `StageHunk` (`S`) and `UnstageHunk` (`U`) commands to input handler
+  - ✅ Implemented state management with automatic diff and status refresh
+  - ✅ Added navigation position preservation during refresh operations
+  - ✅ Complete keyboard-driven hunk staging workflow matching Magit functionality
 
 **Success Criteria**:
 - ✅ Generate patches for individual hunks correctly

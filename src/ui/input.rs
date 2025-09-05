@@ -36,6 +36,10 @@ pub enum Command {
     GoToTopOfDiff,
     GoToBottomOfDiff,
 
+    // Hunk operations
+    StageHunk,
+    UnstageHunk,
+
     // Help
     ShowHelp,
 
@@ -184,6 +188,8 @@ impl InputHandler {
                     'b' => Command::PageDiffUp,
                     'n' => Command::JumpToNextHunk,
                     'p' => Command::JumpToPreviousHunk,
+                    'S' => Command::StageHunk,
+                    'U' => Command::UnstageHunk,
                     '?' => Command::ShowHelp,
                     _ => Command::Unknown,
                 };
@@ -252,6 +258,10 @@ impl InputHandler {
             "  u       Unstage file",
             "  a       Add untracked file",
             "  Space   Toggle stage/unstage",
+            "",
+            "Hunk Operations (in diff view):",
+            "  S       Stage current hunk",
+            "  U       Unstage current hunk",
             "",
             "Application:",
             "  q       Quit application",

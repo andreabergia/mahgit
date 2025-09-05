@@ -6,7 +6,7 @@ pub mod navigation;
 pub mod status_view;
 
 use crate::diff::{Diff, DiffGenerator};
-use crate::operations::StagingOperations;
+use crate::operations::{HunkStager, StagingOperations};
 use crate::repository::Repository;
 use crate::status::RepositoryStatus;
 use crossterm::{
@@ -202,6 +202,12 @@ impl App {
             }
             Command::GoToBottomOfDiff => {
                 self.go_to_bottom_of_diff();
+            }
+            Command::StageHunk => {
+                self.stage_current_hunk();
+            }
+            Command::UnstageHunk => {
+                self.unstage_current_hunk();
             }
             Command::Unknown => {
                 // Ignore unknown commands
@@ -547,6 +553,163 @@ impl App {
         if let Some(diff_view_cell) = &self.diff_view {
             let mut diff_view = diff_view_cell.borrow_mut();
             diff_view.go_to_bottom();
+        }
+    }
+
+    fn stage_current_hunk(&mut self) {
+        // Extract the required data first to avoid borrowing issues
+        let (hunk_info, file_path) = {
+            if let (Some(diff), ViewType::Diff(diff_state)) =
+                (&self.current_diff, &self.current_view)
+            {
+                if let Some(diff_view_cell) = &self.diff_view {
+                    let diff_view = diff_view_cell.borrow();
+                    if let Some(hunk_index) = diff_view.get_current_hunk_index() {
+                        if hunk_index < diff.hunks.len() {
+                            (
+                                Some((hunk_index, diff.hunks[hunk_index].clone())),
+                                diff_state.file_path.clone(),
+                            )
+                        } else {
+                            (None, String::new())
+                        }
+                    } else {
+                        (None, String::new())
+                    }
+                } else {
+                    (None, String::new())
+                }
+            } else {
+                (None, String::new())
+            }
+        };
+
+        if let Some((_hunk_index, hunk)) = hunk_info {
+            let hunk_stager = HunkStager::new(&self.repository);
+
+            match hunk_stager.stage_hunk(&file_path, &hunk) {
+                Ok(result) => {
+                    self.feedback_manager.show_result(result);
+                    // Refresh both status and diff view
+                    self.refresh_status_and_diff();
+                }
+                Err(err) => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(format!(
+                            "Failed to stage hunk: {}",
+                            err
+                        )));
+                }
+            }
+        }
+    }
+
+    fn unstage_current_hunk(&mut self) {
+        // Extract the required data first to avoid borrowing issues
+        let (hunk_info, file_path) = {
+            if let (Some(diff), ViewType::Diff(diff_state)) =
+                (&self.current_diff, &self.current_view)
+            {
+                if let Some(diff_view_cell) = &self.diff_view {
+                    let diff_view = diff_view_cell.borrow();
+                    if let Some(hunk_index) = diff_view.get_current_hunk_index() {
+                        if hunk_index < diff.hunks.len() {
+                            (
+                                Some((hunk_index, diff.hunks[hunk_index].clone())),
+                                diff_state.file_path.clone(),
+                            )
+                        } else {
+                            (None, String::new())
+                        }
+                    } else {
+                        (None, String::new())
+                    }
+                } else {
+                    (None, String::new())
+                }
+            } else {
+                (None, String::new())
+            }
+        };
+
+        if let Some((_hunk_index, hunk)) = hunk_info {
+            let hunk_stager = HunkStager::new(&self.repository);
+
+            match hunk_stager.unstage_hunk(&file_path, &hunk) {
+                Ok(result) => {
+                    self.feedback_manager.show_result(result);
+                    // Refresh both status and diff view
+                    self.refresh_status_and_diff();
+                }
+                Err(err) => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(format!(
+                            "Failed to unstage hunk: {}",
+                            err
+                        )));
+                }
+            }
+        }
+    }
+
+    fn refresh_status_and_diff(&mut self) {
+        // First refresh the repository status
+        if self.status.reload(&self.repository).is_ok() {
+            self.navigation.update_status(&self.status);
+        }
+
+        // Then refresh the diff view if we're currently viewing a diff
+        if let ViewType::Diff(diff_state) = &self.current_view.clone() {
+            let diff_generator = DiffGenerator::new(self.repository.git2_repo());
+            match diff_generator
+                .generate_diff(&diff_state.file_path, diff_state.diff_context.clone())
+            {
+                Ok(new_diff) => {
+                    // Preserve navigation state
+                    let current_hunk_index = self.diff_view.as_ref().and_then(|cell| {
+                        let diff_view = cell.borrow();
+                        diff_view.get_current_hunk_index()
+                    });
+
+                    // Update the diff and diff view
+                    self.current_diff = Some(new_diff.clone());
+                    let mut new_diff_view = diff_view::DiffView::new(new_diff);
+
+                    // Try to maintain the current hunk selection
+                    if let Some(hunk_index) = current_hunk_index
+                        && hunk_index < new_diff_view.get_hunk_count()
+                    {
+                        // Navigate to the same hunk index if it still exists
+                        for _ in 0..hunk_index {
+                            new_diff_view.navigate_to_next_hunk();
+                        }
+                    }
+
+                    self.diff_view = Some(RefCell::new(new_diff_view));
+                }
+                Err(err) => {
+                    // Handle errors by showing error in diff view or feedback
+                    match &err {
+                        crate::diff::generator::DiffError::BinaryFile(_)
+                        | crate::diff::generator::DiffError::FileTooLarge(_, _)
+                        | crate::diff::generator::DiffError::TerminalCompatibility(_) => {
+                            self.diff_view =
+                                Some(RefCell::new(diff_view::DiffView::new_with_error(
+                                    diff_state.file_path.clone(),
+                                    err,
+                                )));
+                        }
+                        _ => {
+                            self.feedback_manager.show_result(
+                                crate::operations::OperationResult::new(format!(
+                                    "Failed to refresh diff for {}: {}",
+                                    diff_state.file_path, err
+                                )),
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 }
