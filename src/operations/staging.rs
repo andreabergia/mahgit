@@ -30,6 +30,7 @@ impl<'repo> StagingOperations<'repo> {
 
 /// Handles staging/unstaging individual hunks
 pub struct HunkStager<'repo> {
+    #[allow(dead_code)]
     repository: &'repo Repository,
 }
 
