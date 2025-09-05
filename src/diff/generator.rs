@@ -166,7 +166,8 @@ impl<'repo> DiffGenerator<'repo> {
         // check if it's an untracked file and generate synthetic diff
         if hunks.is_empty()
             && matches!(context, DiffContext::WorkingTreeToIndex)
-            && let Ok(synthetic_diff) = self.generate_untracked_file_diff(file_path, context.clone())
+            && let Ok(synthetic_diff) =
+                self.generate_untracked_file_diff(file_path, context.clone())
         {
             return Ok(synthetic_diff);
         }

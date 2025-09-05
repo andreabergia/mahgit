@@ -60,20 +60,20 @@ impl<'a> StatusView<'a> {
         let mut items = Vec::new();
         let mut current_file_index = 0;
 
+        self.add_section_items(
+            &mut items,
+            &mut current_file_index,
+            StatusSection::Conflicted,
+            "Conflicted files",
+            self.status.conflicted_files(),
+        );
+
         self.add_section_items_with_entries(
             &mut items,
             &mut current_file_index,
             StatusSection::Unstaged,
             "Unstaged changes",
             self.status.unstaged_files(),
-        );
-
-        self.add_section_items_with_entries(
-            &mut items,
-            &mut current_file_index,
-            StatusSection::Staged,
-            "Staged changes",
-            self.status.staged_files(),
         );
 
         self.add_section_items(
@@ -84,12 +84,12 @@ impl<'a> StatusView<'a> {
             self.status.untracked_files(),
         );
 
-        self.add_section_items(
+        self.add_section_items_with_entries(
             &mut items,
             &mut current_file_index,
-            StatusSection::Conflicted,
-            "Conflicted files",
-            self.status.conflicted_files(),
+            StatusSection::Staged,
+            "Staged changes",
+            self.status.staged_files(),
         );
 
         let list = List::new(items);

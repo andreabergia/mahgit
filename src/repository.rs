@@ -145,7 +145,7 @@ mod tests {
         let repo_error = RepositoryError::GitError(git_error);
         assert!(repo_error.to_string().contains("Git error"));
 
-        let io_error = std::io::Error::new(std::io::ErrorKind::Other, "test io error");
+        let io_error = std::io::Error::other("test io error");
         let repo_error = RepositoryError::IoError(io_error);
         assert!(repo_error.to_string().contains("IO error"));
     }
