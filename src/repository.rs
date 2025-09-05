@@ -78,9 +78,35 @@ impl Repository {
 
     pub fn add_to_index(&self, path: &str) -> Result<(), RepositoryError> {
         let mut index = self.get_index()?;
-        index
-            .add_path(std::path::Path::new(path))
-            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        // Check if the file exists in the working directory relative to the repo root
+        let workdir = self.git_repo.workdir().ok_or_else(|| {
+            RepositoryError::Other("Repository has no working directory".to_string())
+        })?;
+        let file_path = std::path::Path::new(path);
+        let absolute_file_path = workdir.join(file_path);
+
+        if !absolute_file_path.exists() {
+            // If the file doesn't exist, check if it exists in the index
+            // If it does, this is a deletion and we need to remove it from the index
+            if index.get_path(file_path, 0).is_some() {
+                index
+                    .remove_path(file_path)
+                    .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+            } else {
+                // File doesn't exist in working directory or index
+                return Err(RepositoryError::Other(format!(
+                    "File '{}' does not exist and is not tracked",
+                    path
+                )));
+            }
+        } else {
+            // File exists, add it normally
+            index
+                .add_path(file_path)
+                .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+        }
+
         index
             .write()
             .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
@@ -95,14 +121,11 @@ impl Repository {
             .peel_to_commit()
             .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
 
-        let head_tree = head_commit
-            .tree()
-            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
-
-        let head_object = head_tree.as_object();
+        // Pass the commit object, not the tree object
+        let head_commit_object = head_commit.as_object();
 
         self.git_repo
-            .reset_default(Some(head_object), [path])
+            .reset_default(Some(head_commit_object), [path])
             .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
 
         Ok(())

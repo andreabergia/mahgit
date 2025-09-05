@@ -667,6 +667,21 @@ criterion = "0.5"  # For performance benchmarks
 - ✅ Enhanced test coverage with proper integration tests
 - ✅ All 49 tests passing (38 unit + 8 integration + 3 UI tests)
 
+### ✅ DELETE FILE SUPPORT FIXES (COMPLETED)
+**Files**: `src/repository.rs:79-113`, `src/repository.rs:116-132`
+
+**Issues Fixed**:
+- ✅ **Staging deleted files** was throwing "No such file or directory" error
+- ✅ **Unstaging deleted files** was throwing "cannot be peeled into a commit" error
+
+**Root Causes and Solutions**:
+1. **Staging Issue**: `add_to_index()` tried to use `index.add_path()` on deleted files
+   - **Fix**: Check if file exists; if not but tracked in index, use `index.remove_path()` to stage deletion
+2. **Unstaging Issue**: `reset_file()` passed tree object to `reset_default()` instead of commit object  
+   - **Fix**: Pass commit object (`head_commit.as_object()`) instead of tree object
+
+**Testing**: Comprehensive tests verify both staging and unstaging of deleted files work correctly
+
 ---
 
 **Phase 3 Status: FULLY COMPLETE ✅**
@@ -681,6 +696,10 @@ All staging operations are now fully functional:
 | `a` | Add file | Untracked files | ✅ Adds file to staging area |
 | `Space` | Toggle stage | Any file | ✅ Context-aware stage/unstage/add |
 | `r` | Refresh | Any time | ✅ Reloads repository status |
+
+**✅ DELETE FILE SUPPORT**: All operations correctly handle deleted files:
+- **Staging deleted files**: Uses `index.remove_path()` to stage file deletions
+- **Unstaging deleted files**: Uses commit object (not tree object) in `reset_default()` for proper unstaging
 
 ### 🏗️ Architecture Quality
 - **Clean separation of concerns** with dedicated modules
