@@ -5,8 +5,8 @@ pub mod input;
 pub mod navigation;
 pub mod status_view;
 
-use crate::diff::{Diff, DiffGenerator};
-use crate::operations::{HunkStager, StagingOperations};
+use crate::diff::DiffGenerator;
+use crate::operations::StagingOperations;
 use crate::repository::Repository;
 use crate::status::RepositoryStatus;
 use crossterm::{
@@ -19,7 +19,6 @@ use input::{Command, InputHandler};
 use navigation::{NavigationState, OperationContext, SelectedFile};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use status_view::StatusView;
-use std::cell::RefCell;
 use std::io::{Stdout, stdout};
 
 pub struct App {
@@ -31,22 +30,11 @@ pub struct App {
     input_handler: InputHandler,
     feedback_manager: FeedbackManager,
     show_help: bool,
-    current_diff: Option<Diff>,
-    diff_view: Option<RefCell<diff_view::DiffView>>,
 }
 
 #[derive(Clone, PartialEq)]
 pub enum ViewType {
-    Status,
-    Diff(DiffViewState),
-}
-
-#[derive(Clone, PartialEq)]
-pub struct DiffViewState {
-    pub file_path: String,
-    pub diff_context: crate::diff::DiffContext,
-    pub scroll_position: usize,
-    pub hunk_index: Option<usize>,
+    Status, // Remove Diff variant - everything stays in Status view
 }
 
 impl App {
@@ -61,8 +49,6 @@ impl App {
             input_handler: InputHandler::new(),
             feedback_manager: FeedbackManager::new(),
             show_help: false,
-            current_diff: None,
-            diff_view: None,
         }
     }
 
@@ -130,22 +116,18 @@ impl App {
 
     fn handle_command(&mut self, command: Command) {
         match command {
-            Command::MoveUp => match self.current_view {
-                ViewType::Status => self.navigation.move_up(),
-                ViewType::Diff(_) => self.scroll_diff_up(),
-            },
-            Command::MoveDown => match self.current_view {
-                ViewType::Status => self.navigation.move_down(),
-                ViewType::Diff(_) => self.scroll_diff_down(),
-            },
-            Command::MoveToTop => match self.current_view {
-                ViewType::Status => self.navigation.move_to_top(),
-                ViewType::Diff(_) => self.go_to_top_of_diff(),
-            },
-            Command::MoveToBottom => match self.current_view {
-                ViewType::Status => self.navigation.move_to_bottom(),
-                ViewType::Diff(_) => self.go_to_bottom_of_diff(),
-            },
+            Command::MoveUp => {
+                self.navigation.move_up();
+            }
+            Command::MoveDown => {
+                self.navigation.move_down();
+            }
+            Command::MoveToTop => {
+                self.navigation.move_to_top();
+            }
+            Command::MoveToBottom => {
+                self.navigation.move_to_bottom();
+            }
             Command::Quit | Command::ForceQuit => {
                 self.should_quit = true;
             }
@@ -168,49 +150,49 @@ impl App {
                 self.toggle_stage_selected_file();
             }
             Command::EnterDiffView => {
-                self.toggle_diff_view();
+                self.toggle_inline_diff();
             }
             Command::ExitDiffView => {
-                self.exit_diff_view();
+                // No longer needed - inline diffs don't have exit
             }
             Command::ToggleAccordion => {
                 self.toggle_accordion();
             }
             Command::ScrollDiffUp => {
-                self.scroll_diff_up();
+                // TODO: Implement inline diff scrolling
             }
             Command::ScrollDiffDown => {
-                self.scroll_diff_down();
+                // TODO: Implement inline diff scrolling
             }
             Command::PageDiffUp => {
-                self.page_diff_up();
+                // TODO: Implement inline diff paging
             }
             Command::PageDiffDown => {
-                self.page_diff_down();
+                // TODO: Implement inline diff paging
             }
             Command::JumpToNextHunk => {
-                self.jump_to_next_hunk();
+                // TODO: Implement inline hunk navigation
             }
             Command::JumpToPreviousHunk => {
-                self.jump_to_previous_hunk();
+                // TODO: Implement inline hunk navigation
             }
             Command::NextHunk => {
-                self.navigate_to_next_hunk();
+                // TODO: Implement inline hunk navigation
             }
             Command::PreviousHunk => {
-                self.navigate_to_previous_hunk();
+                // TODO: Implement inline hunk navigation
             }
             Command::GoToTopOfDiff => {
-                self.go_to_top_of_diff();
+                // TODO: Implement inline diff navigation
             }
             Command::GoToBottomOfDiff => {
-                self.go_to_bottom_of_diff();
+                // TODO: Implement inline diff navigation
             }
             Command::StageHunk => {
-                self.stage_current_hunk();
+                // TODO: Implement inline hunk staging
             }
             Command::UnstageHunk => {
-                self.unstage_current_hunk();
+                // TODO: Implement inline hunk staging
             }
             Command::Unknown => {
                 // Ignore unknown commands
@@ -292,90 +274,48 @@ impl App {
             // If reload fails, we still want to continue, just won't have updated status
         } else {
             self.navigation.update_status(&self.status);
-        }
-    }
-
-    fn toggle_diff_view(&mut self) {
-        match &self.current_view {
-            ViewType::Status => self.enter_diff_view(),
-            ViewType::Diff(_) => self.exit_diff_view(),
-        }
-    }
-
-    fn enter_diff_view(&mut self) {
-        if !matches!(self.current_view, ViewType::Status) {
-            return; // Only allow entering diff view from status view
-        }
-
-        if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
-            // Determine the appropriate diff context based on the file's location
-            let diff_context = self.determine_diff_context(&selected_file);
-
-            // Generate the diff
-            let diff_generator = DiffGenerator::new(self.repository.git2_repo());
-            match diff_generator.generate_diff(&selected_file.path, diff_context.clone()) {
-                Ok(diff) => {
-                    self.diff_view = Some(RefCell::new(diff_view::DiffView::new(diff.clone())));
-                    self.current_diff = Some(diff);
-                    self.current_view = ViewType::Diff(DiffViewState {
-                        file_path: selected_file.path.clone(),
-                        diff_context,
-                        scroll_position: 0,
-                        hunk_index: None,
-                    });
-                }
-                Err(err) => {
-                    // For certain recoverable errors, show the error in diff view instead of feedback
-                    match &err {
-                        crate::diff::generator::DiffError::BinaryFile(_)
-                        | crate::diff::generator::DiffError::FileTooLarge(_, _)
-                        | crate::diff::generator::DiffError::TerminalCompatibility(_) => {
-                            self.diff_view =
-                                Some(RefCell::new(diff_view::DiffView::new_with_error(
-                                    selected_file.path.clone(),
-                                    err,
-                                )));
-                            self.current_view = ViewType::Diff(DiffViewState {
-                                file_path: selected_file.path.clone(),
-                                diff_context,
-                                scroll_position: 0,
-                                hunk_index: None,
-                            });
-                        }
-                        _ => {
-                            // For other errors, show in feedback
-                            self.feedback_manager.show_result(
-                                crate::operations::OperationResult::new(format!(
-                                    "Failed to generate diff for {}: {}",
-                                    selected_file.path, err
-                                )),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn exit_diff_view(&mut self) {
-        if matches!(self.current_view, ViewType::Diff(_)) {
-            self.current_view = ViewType::Status;
-            self.current_diff = None;
-            self.diff_view = None;
+            // Clear diff cache when status changes
+            self.navigation.clear_diff_cache();
         }
     }
 
     fn toggle_accordion(&mut self) {
-        match &self.current_view {
-            ViewType::Status => {
-                // For now, always toggle the current section's collapsed state
-                // TODO: Add logic to determine if cursor is on section header vs file
-                let current_section = self.navigation.current_section();
-                self.navigation.toggle_section_collapsed(current_section);
-            }
-            ViewType::Diff(_) => {
-                // In diff view, Tab should still exit to status view for now
-                self.exit_diff_view();
+        // For now, always toggle the current section's collapsed state
+        // TODO: Add context-aware logic to determine if cursor is on section header vs file
+        let current_section = self.navigation.current_section();
+        self.navigation.toggle_section_collapsed(current_section);
+    }
+
+    fn toggle_inline_diff(&mut self) {
+        if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+            let diff_context = self.determine_diff_context(&selected_file);
+
+            // Check if diff is already expanded
+            if self.navigation.is_file_diff_expanded(&selected_file.path) {
+                // Collapse the diff
+                self.navigation
+                    .toggle_file_diff_expanded(selected_file.path, diff_context);
+            } else {
+                // Expand and generate the diff
+                self.navigation
+                    .toggle_file_diff_expanded(selected_file.path.clone(), diff_context.clone());
+
+                // Generate the diff
+                let diff_generator = DiffGenerator::new(self.repository.git2_repo());
+                match diff_generator.generate_diff(&selected_file.path, diff_context.clone()) {
+                    Ok(diff) => {
+                        self.navigation
+                            .set_file_diff(selected_file.path, diff, diff_context);
+                    }
+                    Err(err) => {
+                        // Show error in feedback
+                        self.feedback_manager
+                            .show_result(crate::operations::OperationResult::new(format!(
+                                "Failed to generate diff for {}: {}",
+                                selected_file.path, err
+                            )));
+                    }
+                }
             }
         }
     }
@@ -394,19 +334,9 @@ impl App {
     pub fn render(&self, f: &mut ratatui::Frame) {
         let area = f.area();
 
-        match &self.current_view {
-            ViewType::Status => {
-                let status_view = StatusView::new(&self.status, &self.navigation);
-                status_view.render(f, area);
-            }
-            ViewType::Diff(_diff_state) => {
-                if let Some(diff_view_cell) = &self.diff_view {
-                    let mut diff_view = diff_view_cell.borrow_mut();
-                    diff_view.update_viewport_height(area.height);
-                    diff_view.render(f, area);
-                }
-            }
-        }
+        // Always render the status view (now with inline diffs)
+        let status_view = StatusView::new(&self.status, &self.navigation);
+        status_view.render(f, area);
 
         // Render feedback message if there is one
         if let Some(feedback) = self.feedback_manager.get_current_message() {
@@ -503,231 +433,5 @@ impl App {
         f.render_widget(help_list, content_area);
     }
 
-    // Diff navigation methods
-    fn scroll_diff_up(&mut self) {
-        if let Some(diff_view_cell) = &self.diff_view {
-            let mut diff_view = diff_view_cell.borrow_mut();
-            diff_view.scroll_up(1);
-        }
-    }
-
-    fn scroll_diff_down(&mut self) {
-        if let Some(diff_view_cell) = &self.diff_view {
-            let mut diff_view = diff_view_cell.borrow_mut();
-            diff_view.scroll_down(1);
-        }
-    }
-
-    fn page_diff_up(&mut self) {
-        if let Some(diff_view_cell) = &self.diff_view {
-            let mut diff_view = diff_view_cell.borrow_mut();
-            diff_view.page_up();
-        }
-    }
-
-    fn page_diff_down(&mut self) {
-        if let Some(diff_view_cell) = &self.diff_view {
-            let mut diff_view = diff_view_cell.borrow_mut();
-            diff_view.page_down();
-        }
-    }
-
-    fn jump_to_next_hunk(&mut self) {
-        if let Some(diff_view_cell) = &self.diff_view {
-            let mut diff_view = diff_view_cell.borrow_mut();
-            diff_view.jump_to_next_hunk();
-        }
-    }
-
-    fn jump_to_previous_hunk(&mut self) {
-        if let Some(diff_view_cell) = &self.diff_view {
-            let mut diff_view = diff_view_cell.borrow_mut();
-            diff_view.jump_to_previous_hunk();
-        }
-    }
-
-    fn navigate_to_next_hunk(&mut self) {
-        if let Some(diff_view_cell) = &self.diff_view {
-            let mut diff_view = diff_view_cell.borrow_mut();
-            diff_view.navigate_to_next_hunk();
-        }
-    }
-
-    fn navigate_to_previous_hunk(&mut self) {
-        if let Some(diff_view_cell) = &self.diff_view {
-            let mut diff_view = diff_view_cell.borrow_mut();
-            diff_view.navigate_to_previous_hunk();
-        }
-    }
-
-    fn go_to_top_of_diff(&mut self) {
-        if let Some(diff_view_cell) = &self.diff_view {
-            let mut diff_view = diff_view_cell.borrow_mut();
-            diff_view.go_to_top();
-        }
-    }
-
-    fn go_to_bottom_of_diff(&mut self) {
-        if let Some(diff_view_cell) = &self.diff_view {
-            let mut diff_view = diff_view_cell.borrow_mut();
-            diff_view.go_to_bottom();
-        }
-    }
-
-    fn stage_current_hunk(&mut self) {
-        // Extract the required data first to avoid borrowing issues
-        let (hunk_info, file_path) = {
-            if let (Some(diff), ViewType::Diff(diff_state)) =
-                (&self.current_diff, &self.current_view)
-            {
-                if let Some(diff_view_cell) = &self.diff_view {
-                    let diff_view = diff_view_cell.borrow();
-                    if let Some(hunk_index) = diff_view.get_current_hunk_index() {
-                        if hunk_index < diff.hunks.len() {
-                            (
-                                Some((hunk_index, diff.hunks[hunk_index].clone())),
-                                diff_state.file_path.clone(),
-                            )
-                        } else {
-                            (None, String::new())
-                        }
-                    } else {
-                        (None, String::new())
-                    }
-                } else {
-                    (None, String::new())
-                }
-            } else {
-                (None, String::new())
-            }
-        };
-
-        if let Some((_hunk_index, hunk)) = hunk_info {
-            let hunk_stager = HunkStager::new(&self.repository);
-
-            match hunk_stager.stage_hunk(&file_path, &hunk) {
-                Ok(result) => {
-                    self.feedback_manager.show_result(result);
-                    // Refresh both status and diff view
-                    self.refresh_status_and_diff();
-                }
-                Err(err) => {
-                    self.feedback_manager
-                        .show_result(crate::operations::OperationResult::new(format!(
-                            "Failed to stage hunk: {}",
-                            err
-                        )));
-                }
-            }
-        }
-    }
-
-    fn unstage_current_hunk(&mut self) {
-        // Extract the required data first to avoid borrowing issues
-        let (hunk_info, file_path) = {
-            if let (Some(diff), ViewType::Diff(diff_state)) =
-                (&self.current_diff, &self.current_view)
-            {
-                if let Some(diff_view_cell) = &self.diff_view {
-                    let diff_view = diff_view_cell.borrow();
-                    if let Some(hunk_index) = diff_view.get_current_hunk_index() {
-                        if hunk_index < diff.hunks.len() {
-                            (
-                                Some((hunk_index, diff.hunks[hunk_index].clone())),
-                                diff_state.file_path.clone(),
-                            )
-                        } else {
-                            (None, String::new())
-                        }
-                    } else {
-                        (None, String::new())
-                    }
-                } else {
-                    (None, String::new())
-                }
-            } else {
-                (None, String::new())
-            }
-        };
-
-        if let Some((_hunk_index, hunk)) = hunk_info {
-            let hunk_stager = HunkStager::new(&self.repository);
-
-            match hunk_stager.unstage_hunk(&file_path, &hunk) {
-                Ok(result) => {
-                    self.feedback_manager.show_result(result);
-                    // Refresh both status and diff view
-                    self.refresh_status_and_diff();
-                }
-                Err(err) => {
-                    self.feedback_manager
-                        .show_result(crate::operations::OperationResult::new(format!(
-                            "Failed to unstage hunk: {}",
-                            err
-                        )));
-                }
-            }
-        }
-    }
-
-    fn refresh_status_and_diff(&mut self) {
-        // First refresh the repository status
-        if self.status.reload(&self.repository).is_ok() {
-            self.navigation.update_status(&self.status);
-        }
-
-        // Then refresh the diff view if we're currently viewing a diff
-        if let ViewType::Diff(diff_state) = &self.current_view.clone() {
-            let diff_generator = DiffGenerator::new(self.repository.git2_repo());
-            match diff_generator
-                .generate_diff(&diff_state.file_path, diff_state.diff_context.clone())
-            {
-                Ok(new_diff) => {
-                    // Preserve navigation state
-                    let current_hunk_index = self.diff_view.as_ref().and_then(|cell| {
-                        let diff_view = cell.borrow();
-                        diff_view.get_current_hunk_index()
-                    });
-
-                    // Update the diff and diff view
-                    self.current_diff = Some(new_diff.clone());
-                    let mut new_diff_view = diff_view::DiffView::new(new_diff);
-
-                    // Try to maintain the current hunk selection
-                    if let Some(hunk_index) = current_hunk_index
-                        && hunk_index < new_diff_view.get_hunk_count()
-                    {
-                        // Navigate to the same hunk index if it still exists
-                        for _ in 0..hunk_index {
-                            new_diff_view.navigate_to_next_hunk();
-                        }
-                    }
-
-                    self.diff_view = Some(RefCell::new(new_diff_view));
-                }
-                Err(err) => {
-                    // Handle errors by showing error in diff view or feedback
-                    match &err {
-                        crate::diff::generator::DiffError::BinaryFile(_)
-                        | crate::diff::generator::DiffError::FileTooLarge(_, _)
-                        | crate::diff::generator::DiffError::TerminalCompatibility(_) => {
-                            self.diff_view =
-                                Some(RefCell::new(diff_view::DiffView::new_with_error(
-                                    diff_state.file_path.clone(),
-                                    err,
-                                )));
-                        }
-                        _ => {
-                            self.feedback_manager.show_result(
-                                crate::operations::OperationResult::new(format!(
-                                    "Failed to refresh diff for {}: {}",
-                                    diff_state.file_path, err
-                                )),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // TODO: Implement inline hunk staging methods
 }

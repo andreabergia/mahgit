@@ -247,11 +247,13 @@ impl NavigationState {
   - All existing diff navigation and hunk operations preserved
   - Updated help text to reflect new key bindings: Tab (section toggle) + Enter (diff view)
 
-#### Phase 2: Inline Diff Display
-- Remove full-screen diff view mode
-- Implement inline diff rendering in StatusView
-- Extend Tab key handling for file diff toggle (context-aware)
-- Implement diff caching system
+#### Phase 2: Inline Diff Display ⚡ IN PROGRESS
+- ✅ Remove full-screen diff view mode (ViewType::Diff variant eliminated)
+- ✅ Add inline diff state management to NavigationState (InlineDiffState, file_diffs HashMap)
+- ✅ Implement basic inline diff toggle functionality (Enter key now toggles inline diffs)
+- 🔄 Implement inline diff rendering in StatusView (CURRENT TASK)
+- ⏳ Extend Tab key handling for file diff toggle (context-aware)
+- ⏳ Implement diff caching system
 
 **Note**: After Phase 1 implementation, the key binding strategy was refined:
 - Tab = Section collapse/expand (simple, predictable)

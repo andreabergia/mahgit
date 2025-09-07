@@ -122,7 +122,8 @@ impl InputHandler {
             }
 
             KeyEvent {
-                code: KeyCode::Enter, ..
+                code: KeyCode::Enter,
+                ..
             } => {
                 self.clear_sequence_state();
                 Command::EnterDiffView

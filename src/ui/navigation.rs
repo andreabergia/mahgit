@@ -1,4 +1,6 @@
+use crate::diff::Diff;
 use crate::status::RepositoryStatus;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct SelectedFile {
@@ -30,11 +32,21 @@ pub struct SectionCollapsedState {
     pub staged: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct InlineDiffState {
+    pub file_path: String,
+    pub diff_context: crate::diff::DiffContext,
+    pub diff: Option<Diff>,
+    pub expanded: bool,
+}
+
 pub struct NavigationState {
     current_section: StatusSection,
     selected_index: usize,
     sections: Vec<SectionInfo>,
     section_collapsed: SectionCollapsedState,
+    file_diffs: HashMap<String, InlineDiffState>,
+    current_diff_scroll: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -65,6 +77,8 @@ impl NavigationState {
             selected_index: 0,
             sections,
             section_collapsed: SectionCollapsedState::default(),
+            file_diffs: HashMap::new(),
+            current_diff_scroll: 0,
         }
     }
 
@@ -222,6 +236,66 @@ impl NavigationState {
             }
             StatusSection::Staged => self.section_collapsed.staged = !self.section_collapsed.staged,
         }
+    }
+
+    pub fn is_file_diff_expanded(&self, file_path: &str) -> bool {
+        self.file_diffs
+            .get(file_path)
+            .map(|state| state.expanded)
+            .unwrap_or(false)
+    }
+
+    pub fn get_file_diff(&self, file_path: &str) -> Option<&InlineDiffState> {
+        self.file_diffs.get(file_path)
+    }
+
+    pub fn toggle_file_diff_expanded(
+        &mut self,
+        file_path: String,
+        diff_context: crate::diff::DiffContext,
+    ) {
+        match self.file_diffs.get_mut(&file_path) {
+            Some(diff_state) => {
+                diff_state.expanded = !diff_state.expanded;
+            }
+            None => {
+                // Create new diff state as expanded
+                self.file_diffs.insert(
+                    file_path.clone(),
+                    InlineDiffState {
+                        file_path,
+                        diff_context,
+                        diff: None,
+                        expanded: true,
+                    },
+                );
+            }
+        }
+    }
+
+    pub fn set_file_diff(
+        &mut self,
+        file_path: String,
+        diff: Diff,
+        diff_context: crate::diff::DiffContext,
+    ) {
+        self.file_diffs.insert(
+            file_path.clone(),
+            InlineDiffState {
+                file_path,
+                diff_context,
+                diff: Some(diff),
+                expanded: true,
+            },
+        );
+    }
+
+    pub fn clear_diff_cache(&mut self) {
+        self.file_diffs.clear();
+    }
+
+    pub fn remove_file_diff(&mut self, file_path: &str) {
+        self.file_diffs.remove(file_path);
     }
 
     fn build_sections(status: &RepositoryStatus) -> Vec<SectionInfo> {
