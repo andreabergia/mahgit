@@ -24,6 +24,9 @@ pub enum Command {
     EnterDiffView,
     ExitDiffView,
 
+    // Accordion commands
+    ToggleAccordion, // Contextual Tab key behavior
+
     // Diff navigation commands
     ScrollDiffUp,
     ScrollDiffDown,
@@ -113,6 +116,13 @@ impl InputHandler {
 
             KeyEvent {
                 code: KeyCode::Tab, ..
+            } => {
+                self.clear_sequence_state();
+                Command::ToggleAccordion
+            }
+
+            KeyEvent {
+                code: KeyCode::Enter, ..
             } => {
                 self.clear_sequence_state();
                 Command::EnterDiffView
@@ -246,8 +256,9 @@ impl InputHandler {
             "  gg/Home Jump to top / Top of diff",
             "  G/End   Jump to bottom / Bottom of diff",
             "",
-            "Diff Navigation:",
-            "  Tab     Toggle diff view",
+            "Section & Diff Navigation:",
+            "  Tab     Toggle section collapsed/expanded",
+            "  Enter   Enter diff view",
             "  f/PgDn  Page down in diff",
             "  b/PgUp  Page up in diff",
             "  n/→     Jump to next hunk",

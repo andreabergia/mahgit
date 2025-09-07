@@ -173,6 +173,9 @@ impl App {
             Command::ExitDiffView => {
                 self.exit_diff_view();
             }
+            Command::ToggleAccordion => {
+                self.toggle_accordion();
+            }
             Command::ScrollDiffUp => {
                 self.scroll_diff_up();
             }
@@ -359,6 +362,21 @@ impl App {
             self.current_view = ViewType::Status;
             self.current_diff = None;
             self.diff_view = None;
+        }
+    }
+
+    fn toggle_accordion(&mut self) {
+        match &self.current_view {
+            ViewType::Status => {
+                // For now, always toggle the current section's collapsed state
+                // TODO: Add logic to determine if cursor is on section header vs file
+                let current_section = self.navigation.current_section();
+                self.navigation.toggle_section_collapsed(current_section);
+            }
+            ViewType::Diff(_) => {
+                // In diff view, Tab should still exit to status view for now
+                self.exit_diff_view();
+            }
         }
     }
 

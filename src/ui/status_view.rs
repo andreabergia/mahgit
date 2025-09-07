@@ -108,7 +108,9 @@ impl<'a> StatusView<'a> {
             return;
         }
 
-        let section_header = format!("{} ({})", header, entries.len());
+        let is_collapsed = self.navigation.is_section_collapsed(section);
+        let collapse_icon = if is_collapsed { "▶" } else { "▼" };
+        let section_header = format!("{} {} ({})", collapse_icon, header, entries.len());
         let header_style = Style::default()
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD);
@@ -118,31 +120,34 @@ impl<'a> StatusView<'a> {
             header_style,
         ))));
 
-        for (file_index, entry) in entries.iter().enumerate() {
-            let content = format!("  {} {}", entry.status, entry.path);
+        // Only show files if section is not collapsed
+        if !is_collapsed {
+            for (file_index, entry) in entries.iter().enumerate() {
+                let content = format!("  {} {}", entry.status, entry.path);
 
-            let is_selected = self.navigation.current_section() == section
-                && self.navigation.selected_index() == file_index;
+                let is_selected = self.navigation.current_section() == section
+                    && self.navigation.selected_index() == file_index;
 
-            let style = if is_selected {
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                self.get_file_style(section)
-            };
+                let style = if is_selected {
+                    Style::default()
+                        .bg(Color::DarkGray)
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    self.get_file_style(section)
+                };
 
-            let mut spans = vec![Span::styled(content, style)];
+                let mut spans = vec![Span::styled(content, style)];
 
-            if is_selected {
-                spans.insert(0, Span::styled("> ", Style::default().fg(Color::Yellow)));
-            } else {
-                spans.insert(0, Span::raw("  "));
+                if is_selected {
+                    spans.insert(0, Span::styled("> ", Style::default().fg(Color::Yellow)));
+                } else {
+                    spans.insert(0, Span::raw("  "));
+                }
+
+                items.push(ListItem::new(Line::from(spans)));
+                *current_file_index += 1;
             }
-
-            items.push(ListItem::new(Line::from(spans)));
-            *current_file_index += 1;
         }
 
         items.push(ListItem::new(Line::from("")));
@@ -160,7 +165,9 @@ impl<'a> StatusView<'a> {
             return;
         }
 
-        let section_header = format!("{} ({})", header, files.len());
+        let is_collapsed = self.navigation.is_section_collapsed(section);
+        let collapse_icon = if is_collapsed { "▶" } else { "▼" };
+        let section_header = format!("{} {} ({})", collapse_icon, header, files.len());
         let header_style = Style::default()
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD);
@@ -170,32 +177,35 @@ impl<'a> StatusView<'a> {
             header_style,
         ))));
 
-        for (file_index, file) in files.iter().enumerate() {
-            let file_indicator = self.get_file_indicator(section);
-            let content = format!("  {} {}", file_indicator, file);
+        // Only show files if section is not collapsed
+        if !is_collapsed {
+            for (file_index, file) in files.iter().enumerate() {
+                let file_indicator = self.get_file_indicator(section);
+                let content = format!("  {} {}", file_indicator, file);
 
-            let is_selected = self.navigation.current_section() == section
-                && self.navigation.selected_index() == file_index;
+                let is_selected = self.navigation.current_section() == section
+                    && self.navigation.selected_index() == file_index;
 
-            let style = if is_selected {
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                self.get_file_style(section)
-            };
+                let style = if is_selected {
+                    Style::default()
+                        .bg(Color::DarkGray)
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    self.get_file_style(section)
+                };
 
-            let mut spans = vec![Span::styled(content, style)];
+                let mut spans = vec![Span::styled(content, style)];
 
-            if is_selected {
-                spans.insert(0, Span::styled("> ", Style::default().fg(Color::Yellow)));
-            } else {
-                spans.insert(0, Span::raw("  "));
+                if is_selected {
+                    spans.insert(0, Span::styled("> ", Style::default().fg(Color::Yellow)));
+                } else {
+                    spans.insert(0, Span::raw("  "));
+                }
+
+                items.push(ListItem::new(Line::from(spans)));
+                *current_file_index += 1;
             }
-
-            items.push(ListItem::new(Line::from(spans)));
-            *current_file_index += 1;
         }
 
         items.push(ListItem::new(Line::from("")));

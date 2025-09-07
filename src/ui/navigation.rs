@@ -22,10 +22,19 @@ pub enum OperationContext {
     ReadOnly,
 }
 
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct SectionCollapsedState {
+    pub conflicted: bool,
+    pub unstaged: bool,
+    pub untracked: bool,
+    pub staged: bool,
+}
+
 pub struct NavigationState {
     current_section: StatusSection,
     selected_index: usize,
     sections: Vec<SectionInfo>,
+    section_collapsed: SectionCollapsedState,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -55,6 +64,7 @@ impl NavigationState {
             current_section,
             selected_index: 0,
             sections,
+            section_collapsed: SectionCollapsedState::default(),
         }
     }
 
@@ -187,6 +197,30 @@ impl NavigationState {
             StatusSection::Unstaged => OperationContext::CanStage,
             StatusSection::Untracked => OperationContext::CanAdd,
             StatusSection::Conflicted => OperationContext::ReadOnly,
+        }
+    }
+
+    pub fn is_section_collapsed(&self, section: StatusSection) -> bool {
+        match section {
+            StatusSection::Conflicted => self.section_collapsed.conflicted,
+            StatusSection::Unstaged => self.section_collapsed.unstaged,
+            StatusSection::Untracked => self.section_collapsed.untracked,
+            StatusSection::Staged => self.section_collapsed.staged,
+        }
+    }
+
+    pub fn toggle_section_collapsed(&mut self, section: StatusSection) {
+        match section {
+            StatusSection::Conflicted => {
+                self.section_collapsed.conflicted = !self.section_collapsed.conflicted
+            }
+            StatusSection::Unstaged => {
+                self.section_collapsed.unstaged = !self.section_collapsed.unstaged
+            }
+            StatusSection::Untracked => {
+                self.section_collapsed.untracked = !self.section_collapsed.untracked
+            }
+            StatusSection::Staged => self.section_collapsed.staged = !self.section_collapsed.staged,
         }
     }
 
