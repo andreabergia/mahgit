@@ -280,10 +280,14 @@ impl App {
     }
 
     fn toggle_accordion(&mut self) {
-        // For now, always toggle the current section's collapsed state
-        // TODO: Add context-aware logic to determine if cursor is on section header vs file
-        let current_section = self.navigation.current_section();
-        self.navigation.toggle_section_collapsed(current_section);
+        if self.navigation.is_on_section_header() {
+            // Toggle section collapsed/expanded
+            let current_section = self.navigation.current_section();
+            self.navigation.toggle_section_collapsed(current_section);
+        } else {
+            // Toggle file diff display
+            self.toggle_inline_diff();
+        }
     }
 
     fn toggle_inline_diff(&mut self) {

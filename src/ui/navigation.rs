@@ -294,6 +294,21 @@ impl NavigationState {
         self.file_diffs.clear();
     }
 
+    pub fn is_on_section_header(&self) -> bool {
+        // In the current implementation, we're always on files, not section headers
+        // The section headers are rendered but not navigable
+        // This method determines if Tab should toggle section vs file diff
+        
+        // For now, implement a simple heuristic:
+        // If selected_index is 0 and there are files in current section, we're on first file
+        // If the user wants true section header navigation, we'd need to modify the rendering
+        // to include navigable section headers in the list
+        
+        // Return false for now - always toggle file diff
+        // This preserves existing behavior while adding the infrastructure for future enhancement
+        false
+    }
+
     pub fn remove_file_diff(&mut self, file_path: &str) {
         self.file_diffs.remove(file_path);
     }

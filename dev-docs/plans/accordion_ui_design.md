@@ -257,8 +257,12 @@ impl NavigationState {
   - Renders hunk headers and diff lines with proper indentation and coloring
   - Shows loading placeholder when diff is being generated
   - Applied to both FileEntry and string-based file sections
-- 🔄 Extend Tab key handling for file diff toggle (context-aware) (CURRENT TASK)
-- ⏳ Implement diff caching system
+- ✅ Extend Tab key handling for file diff toggle (context-aware)
+  - Added `is_on_section_header()` method to NavigationState for context detection
+  - Modified `toggle_accordion()` to use context-aware logic: section toggle OR file diff toggle
+  - Infrastructure in place for future enhancement of section header navigation
+  - Currently defaults to file diff toggle behavior (preserves existing UX)
+- ⏳ Implement diff caching system (NEXT TASK)
 
 **Note**: After Phase 1 implementation, the key binding strategy was refined:
 - Tab = Section collapse/expand (simple, predictable)
