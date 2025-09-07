@@ -251,8 +251,13 @@ impl NavigationState {
 - ✅ Remove full-screen diff view mode (ViewType::Diff variant eliminated)
 - ✅ Add inline diff state management to NavigationState (InlineDiffState, file_diffs HashMap)
 - ✅ Implement basic inline diff toggle functionality (Enter key now toggles inline diffs)
-- 🔄 Implement inline diff rendering in StatusView (CURRENT TASK)
-- ⏳ Extend Tab key handling for file diff toggle (context-aware)
+- ✅ Implement inline diff rendering in StatusView
+  - Added `add_inline_diff_items()` method for rendering diff content inline
+  - Supports binary file detection with appropriate placeholder text
+  - Renders hunk headers and diff lines with proper indentation and coloring
+  - Shows loading placeholder when diff is being generated
+  - Applied to both FileEntry and string-based file sections
+- 🔄 Extend Tab key handling for file diff toggle (context-aware) (CURRENT TASK)
 - ⏳ Implement diff caching system
 
 **Note**: After Phase 1 implementation, the key binding strategy was refined:

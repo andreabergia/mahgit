@@ -1,3 +1,4 @@
+use crate::diff::{Diff, LineType};
 use crate::status::{FileEntry, RepositoryStatus};
 use crate::ui::navigation::{NavigationState, StatusSection};
 use ratatui::{
@@ -147,6 +148,23 @@ impl<'a> StatusView<'a> {
 
                 items.push(ListItem::new(Line::from(spans)));
                 *current_file_index += 1;
+
+                // Add inline diff content if file diff is expanded
+                if let Some(diff_state) = self.navigation.get_file_diff(&entry.path) {
+                    if diff_state.expanded {
+                        if let Some(diff) = &diff_state.diff {
+                            self.add_inline_diff_items(items, diff);
+                        } else {
+                            // Show loading placeholder
+                            items.push(ListItem::new(Line::from(Span::styled(
+                                "    Loading diff...",
+                                Style::default()
+                                    .fg(Color::Gray)
+                                    .add_modifier(Modifier::ITALIC),
+                            ))));
+                        }
+                    }
+                }
             }
         }
 
@@ -205,6 +223,23 @@ impl<'a> StatusView<'a> {
 
                 items.push(ListItem::new(Line::from(spans)));
                 *current_file_index += 1;
+
+                // Add inline diff content if file diff is expanded
+                if let Some(diff_state) = self.navigation.get_file_diff(file) {
+                    if diff_state.expanded {
+                        if let Some(diff) = &diff_state.diff {
+                            self.add_inline_diff_items(items, diff);
+                        } else {
+                            // Show loading placeholder
+                            items.push(ListItem::new(Line::from(Span::styled(
+                                "    Loading diff...",
+                                Style::default()
+                                    .fg(Color::Gray)
+                                    .add_modifier(Modifier::ITALIC),
+                            ))));
+                        }
+                    }
+                }
             }
         }
 
@@ -226,6 +261,48 @@ impl<'a> StatusView<'a> {
             StatusSection::Unstaged => Style::default().fg(Color::Red),
             StatusSection::Untracked => Style::default().fg(Color::Magenta),
             StatusSection::Conflicted => Style::default().fg(Color::Yellow),
+        }
+    }
+
+    fn add_inline_diff_items(&self, items: &mut Vec<ListItem>, diff: &Diff) {
+        // Check for binary files
+        if diff.binary {
+            items.push(ListItem::new(Line::from(Span::styled(
+                "    Binary file (not shown)",
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC),
+            ))));
+            return;
+        }
+
+        // Render each hunk
+        for hunk in &diff.hunks {
+            // Hunk header with indentation
+            items.push(ListItem::new(Line::from(Span::styled(
+                format!("    {}", hunk.header.raw),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
+            ))));
+
+            // Diff lines with deeper indentation
+            for line in &hunk.lines {
+                let (prefix, color) = match line.line_type {
+                    LineType::Addition => ("+", Color::Green),
+                    LineType::Deletion => ("-", Color::Red),
+                    LineType::Context => (" ", Color::White),
+                    LineType::NoNewlineEOF => ("\\", Color::Yellow),
+                };
+
+                items.push(ListItem::new(Line::from(Span::styled(
+                    format!("      {}{}", prefix, line.content),
+                    Style::default().fg(color),
+                ))));
+            }
+
+            // Add spacing between hunks if there are multiple hunks
+            if diff.hunks.len() > 1 {
+                items.push(ListItem::new(Line::from("")));
+            }
         }
     }
 }
