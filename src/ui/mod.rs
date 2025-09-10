@@ -81,6 +81,11 @@ impl App {
         self.handle_command(command);
     }
 
+    pub fn process_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
+        let command = self.input_handler.handle_mouse(mouse_event);
+        self.handle_command(command);
+    }
+
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         enable_raw_mode()?;
         let mut stdout = stdout();
@@ -108,11 +113,18 @@ impl App {
         loop {
             terminal.draw(|f| self.render(f))?;
 
-            if event::poll(std::time::Duration::from_millis(16))?
-                && let Event::Key(key) = event::read()?
-            {
-                let command = self.input_handler.handle_key(key);
-                self.handle_command(command);
+            if event::poll(std::time::Duration::from_millis(16))? {
+                match event::read()? {
+                    Event::Key(key) => {
+                        let command = self.input_handler.handle_key(key);
+                        self.handle_command(command);
+                    }
+                    Event::Mouse(mouse) => {
+                        let command = self.input_handler.handle_mouse(mouse);
+                        self.handle_command(command);
+                    }
+                    _ => {}
+                }
             }
 
             if self.should_quit {
@@ -205,6 +217,9 @@ impl App {
             }
             Command::Unknown => {
                 // Ignore unknown commands
+            }
+            Command::None => {
+                // No-op for unhandled events (like unsupported mouse events)
             }
         }
     }

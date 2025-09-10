@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use mahgit::{status::RepositoryStatus, ui::App};
 use std::env;
 use std::path::PathBuf;
@@ -294,6 +294,80 @@ fn test_normal_file_diff_works() {
         !has_error_message,
         "Normal file diff should not show error messages. Buffer content: {}",
         buffer_content
+    );
+}
+
+#[test]
+fn test_mouse_scroll_navigation() {
+    let test_repo = create_test_repository().expect("Failed to create test repository");
+    let repository = test_repo.repository;
+
+    // Set current directory to the test repository
+    std::env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+
+    let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
+
+    // Create some files to scroll through by sending down keys to simulate having items
+    test_app.send_char('j'); // Move down once
+    test_app.send_char('j'); // Move down again
+
+    // Test mouse scroll up
+    let scroll_up = MouseEvent {
+        kind: MouseEventKind::ScrollUp,
+        column: 10,
+        row: 10,
+        modifiers: KeyModifiers::NONE,
+    };
+    test_app.send_mouse(scroll_up);
+
+    // Test mouse scroll down
+    let scroll_down = MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: 10,
+        row: 10,
+        modifiers: KeyModifiers::NONE,
+    };
+    test_app.send_mouse(scroll_down);
+
+    // The interface should respond to mouse events (even if no visual change in empty repo)
+    // This test verifies that mouse events are processed without errors
+    assert!(
+        test_app.render().is_ok(),
+        "App should handle mouse events without errors"
+    );
+}
+
+#[test]
+fn test_mouse_unsupported_events_ignored() {
+    let test_repo = create_test_repository().expect("Failed to create test repository");
+    let repository = test_repo.repository;
+
+    // Set current directory to the test repository
+    std::env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+
+    let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
+
+    // Test that unsupported mouse events don't crash the app
+    let click = MouseEvent {
+        kind: MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: 10,
+        row: 10,
+        modifiers: KeyModifiers::NONE,
+    };
+    test_app.send_mouse(click);
+
+    let mouse_move = MouseEvent {
+        kind: MouseEventKind::Moved,
+        column: 15,
+        row: 15,
+        modifiers: KeyModifiers::NONE,
+    };
+    test_app.send_mouse(mouse_move);
+
+    // App should continue to function normally after unsupported mouse events
+    assert!(
+        test_app.render().is_ok(),
+        "App should ignore unsupported mouse events gracefully"
     );
 }
 

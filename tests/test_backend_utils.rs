@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use mahgit::{repository::Repository, status::RepositoryStatus, ui::App};
 use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 
@@ -41,6 +41,11 @@ impl TestApp {
     /// Convenience method to send a character key
     pub fn send_char(&mut self, c: char) {
         self.send_key_code(KeyCode::Char(c));
+    }
+
+    /// Sends a mouse event to the app
+    pub fn send_mouse(&mut self, mouse_event: MouseEvent) {
+        self.app.process_mouse_event(mouse_event);
     }
 
     /// Renders the app and returns any errors

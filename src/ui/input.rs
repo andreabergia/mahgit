@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +48,9 @@ pub enum Command {
 
     // Unknown command
     Unknown,
+
+    // No-op command for unhandled events
+    None,
 }
 
 #[derive(Debug)]
@@ -218,6 +221,14 @@ impl InputHandler {
                 self.clear_sequence_state();
                 Command::Unknown
             }
+        }
+    }
+
+    pub fn handle_mouse(&mut self, mouse_event: MouseEvent) -> Command {
+        match mouse_event.kind {
+            MouseEventKind::ScrollUp => Command::MoveUp,
+            MouseEventKind::ScrollDown => Command::MoveDown,
+            _ => Command::None,
         }
     }
 
@@ -509,5 +520,56 @@ mod tests {
             state: crossterm::event::KeyEventState::NONE,
         };
         assert_eq!(handler.handle_key(p_key), Command::JumpToPreviousHunk);
+    }
+
+    #[test]
+    fn test_mouse_scroll_up() {
+        let mut handler = InputHandler::new();
+
+        let scroll_up = MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        assert_eq!(handler.handle_mouse(scroll_up), Command::MoveUp);
+    }
+
+    #[test]
+    fn test_mouse_scroll_down() {
+        let mut handler = InputHandler::new();
+
+        let scroll_down = MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        assert_eq!(handler.handle_mouse(scroll_down), Command::MoveDown);
+    }
+
+    #[test]
+    fn test_mouse_unsupported_events() {
+        let mut handler = InputHandler::new();
+
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        assert_eq!(handler.handle_mouse(click), Command::None);
+
+        let move_event = MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        assert_eq!(handler.handle_mouse(move_event), Command::None);
     }
 }
