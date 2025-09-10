@@ -150,19 +150,19 @@ impl<'a> StatusView<'a> {
                 *current_file_index += 1;
 
                 // Add inline diff content if file diff is expanded
-                if let Some(diff_state) = self.navigation.get_file_diff(&entry.path) {
-                    if diff_state.expanded {
-                        if let Some(diff) = &diff_state.diff {
-                            self.add_inline_diff_items(items, diff);
-                        } else {
-                            // Show loading placeholder
-                            items.push(ListItem::new(Line::from(Span::styled(
-                                "    Loading diff...",
-                                Style::default()
-                                    .fg(Color::Gray)
-                                    .add_modifier(Modifier::ITALIC),
-                            ))));
-                        }
+                if let Some(diff_state) = self.navigation.get_file_diff(&entry.path)
+                    && diff_state.expanded
+                {
+                    if let Some(diff) = &diff_state.diff {
+                        self.add_inline_diff_items(items, diff);
+                    } else {
+                        // Show loading placeholder
+                        items.push(ListItem::new(Line::from(Span::styled(
+                            "    Loading diff...",
+                            Style::default()
+                                .fg(Color::Gray)
+                                .add_modifier(Modifier::ITALIC),
+                        ))));
                     }
                 }
             }
@@ -198,8 +198,12 @@ impl<'a> StatusView<'a> {
         // Only show files if section is not collapsed
         if !is_collapsed {
             for (file_index, file) in files.iter().enumerate() {
+                let file_name = std::path::Path::new(file)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(file);
                 let file_indicator = self.get_file_indicator(section);
-                let content = format!("  {} {}", file_indicator, file);
+                let content = format!("  {} {}", file_indicator, file_name);
 
                 let is_selected = self.navigation.current_section() == section
                     && self.navigation.selected_index() == file_index;
@@ -225,19 +229,19 @@ impl<'a> StatusView<'a> {
                 *current_file_index += 1;
 
                 // Add inline diff content if file diff is expanded
-                if let Some(diff_state) = self.navigation.get_file_diff(file) {
-                    if diff_state.expanded {
-                        if let Some(diff) = &diff_state.diff {
-                            self.add_inline_diff_items(items, diff);
-                        } else {
-                            // Show loading placeholder
-                            items.push(ListItem::new(Line::from(Span::styled(
-                                "    Loading diff...",
-                                Style::default()
-                                    .fg(Color::Gray)
-                                    .add_modifier(Modifier::ITALIC),
-                            ))));
-                        }
+                if let Some(diff_state) = self.navigation.get_file_diff(file)
+                    && diff_state.expanded
+                {
+                    if let Some(diff) = &diff_state.diff {
+                        self.add_inline_diff_items(items, diff);
+                    } else {
+                        // Show loading placeholder
+                        items.push(ListItem::new(Line::from(Span::styled(
+                            "    Loading diff...",
+                            Style::default()
+                                .fg(Color::Gray)
+                                .add_modifier(Modifier::ITALIC),
+                        ))));
                     }
                 }
             }

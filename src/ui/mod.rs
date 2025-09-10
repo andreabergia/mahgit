@@ -23,7 +23,6 @@ use std::io::{Stdout, stdout};
 
 pub struct App {
     should_quit: bool,
-    current_view: ViewType,
     repository: Repository,
     status: RepositoryStatus,
     navigation: NavigationState,
@@ -42,7 +41,6 @@ impl App {
         let navigation = NavigationState::new(&status);
         Self {
             should_quit: false,
-            current_view: ViewType::Status,
             repository,
             status,
             navigation,

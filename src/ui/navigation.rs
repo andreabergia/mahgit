@@ -46,7 +46,6 @@ pub struct NavigationState {
     sections: Vec<SectionInfo>,
     section_collapsed: SectionCollapsedState,
     file_diffs: HashMap<String, InlineDiffState>,
-    current_diff_scroll: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -78,7 +77,6 @@ impl NavigationState {
             sections,
             section_collapsed: SectionCollapsedState::default(),
             file_diffs: HashMap::new(),
-            current_diff_scroll: 0,
         }
     }
 
@@ -298,12 +296,12 @@ impl NavigationState {
         // In the current implementation, we're always on files, not section headers
         // The section headers are rendered but not navigable
         // This method determines if Tab should toggle section vs file diff
-        
+
         // For now, implement a simple heuristic:
         // If selected_index is 0 and there are files in current section, we're on first file
         // If the user wants true section header navigation, we'd need to modify the rendering
         // to include navigable section headers in the list
-        
+
         // Return false for now - always toggle file diff
         // This preserves existing behavior while adding the infrastructure for future enhancement
         false
