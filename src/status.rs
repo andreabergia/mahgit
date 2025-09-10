@@ -55,14 +55,17 @@ impl RepositoryStatus {
         let mut untracked = Vec::new();
         let mut conflicted = Vec::new();
 
+        // workdir not needed when using relative paths
+
         for entry in statuses.iter() {
             let path = entry.path().unwrap_or("<invalid utf-8>").to_string();
+
             let status = entry.status();
 
             if status.contains(Status::CONFLICTED) {
-                conflicted.push(path);
+                conflicted.push(path.clone());
             } else if status.contains(Status::WT_NEW) {
-                untracked.push(path);
+                untracked.push(path.clone());
             } else {
                 // Handle staged changes
                 if status.contains(Status::INDEX_NEW) {

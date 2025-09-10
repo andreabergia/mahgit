@@ -458,6 +458,46 @@ mod tests {
     }
 
     #[test]
+    fn test_index_to_head_diff() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path();
+
+        // Initialize repository
+        let repo = git2::Repository::init(repo_path).unwrap();
+
+        // Set up initial commit
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = {
+            let mut index = repo.index().unwrap();
+            index.write_tree().unwrap()
+        };
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
+
+        // Create a test file and stage it
+        let test_file_path = repo_path.join("test.txt");
+        fs::write(&test_file_path, "staged content\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+
+        // Test IndexToHead diff generation
+        let generator = DiffGenerator::new(&repo);
+        let result = generator.generate_diff("test.txt", DiffContext::IndexToHead);
+
+        match result {
+            Ok(diff) => {
+                assert!(!diff.hunks.is_empty(), "IndexToHead diff should have hunks");
+            }
+            Err(e) => {
+                panic!("IndexToHead diff generation failed: {}", e);
+            }
+        }
+    }
+
+    #[test]
     fn test_working_tree_to_index_diff() {
         let (temp_dir, repo) = setup_test_repo();
         let file_path = temp_dir.path().join("test.txt");

@@ -60,6 +60,17 @@ impl App {
         self.should_quit
     }
 
+    // Getters for testing
+    #[cfg(test)]
+    pub fn status(&self) -> &RepositoryStatus {
+        &self.status
+    }
+
+    #[cfg(test)]
+    pub fn navigation(&self) -> &NavigationState {
+        &self.navigation
+    }
+
     /// Force refresh the repository status (for testing purposes)
     pub fn force_refresh(&mut self) -> Result<(), crate::repository::RepositoryError> {
         self.status.reload(&self.repository)?;
@@ -300,19 +311,20 @@ impl App {
                 self.navigation
                     .toggle_file_diff_expanded(selected_file.path, diff_context);
             } else {
-                // Expand and generate the diff
-                self.navigation
-                    .toggle_file_diff_expanded(selected_file.path.clone(), diff_context.clone());
-
-                // Generate the diff
+                // Generate the diff first before marking as expanded
                 let diff_generator = DiffGenerator::new(self.repository.git2_repo());
                 match diff_generator.generate_diff(&selected_file.path, diff_context.clone()) {
                     Ok(diff) => {
+                        // Only expand if diff generation succeeds
+                        self.navigation.toggle_file_diff_expanded(
+                            selected_file.path.clone(),
+                            diff_context.clone(),
+                        );
                         self.navigation
                             .set_file_diff(selected_file.path, diff, diff_context);
                     }
                     Err(err) => {
-                        // Show error in feedback
+                        // Show error in feedback - don't expand the diff
                         self.feedback_manager
                             .show_result(crate::operations::OperationResult::new(format!(
                                 "Failed to generate diff for {}: {}",
