@@ -60,10 +60,12 @@ impl<'a> StatusView<'a> {
     fn render_file_sections(&self, f: &mut Frame, area: Rect) {
         let mut items = Vec::new();
         let mut current_file_index = 0;
+        let mut selected_list_index = None;
 
         self.add_section_items(
             &mut items,
             &mut current_file_index,
+            &mut selected_list_index,
             StatusSection::Conflicted,
             "Conflicted files",
             self.status.conflicted_files(),
@@ -72,6 +74,7 @@ impl<'a> StatusView<'a> {
         self.add_section_items_with_entries(
             &mut items,
             &mut current_file_index,
+            &mut selected_list_index,
             StatusSection::Unstaged,
             "Unstaged changes",
             self.status.unstaged_files(),
@@ -80,6 +83,7 @@ impl<'a> StatusView<'a> {
         self.add_section_items(
             &mut items,
             &mut current_file_index,
+            &mut selected_list_index,
             StatusSection::Untracked,
             "Untracked files",
             self.status.untracked_files(),
@@ -88,19 +92,26 @@ impl<'a> StatusView<'a> {
         self.add_section_items_with_entries(
             &mut items,
             &mut current_file_index,
+            &mut selected_list_index,
             StatusSection::Staged,
             "Staged changes",
             self.status.staged_files(),
         );
 
         let list = List::new(items);
-        f.render_widget(list, area);
+
+        // Create a list state that will handle scrolling automatically
+        let mut list_state = ratatui::widgets::ListState::default();
+        list_state.select(selected_list_index);
+
+        f.render_stateful_widget(list, area, &mut list_state);
     }
 
     fn add_section_items_with_entries(
         &self,
         items: &mut Vec<ListItem>,
         current_file_index: &mut usize,
+        selected_list_index: &mut Option<usize>,
         section: StatusSection,
         header: &str,
         entries: &[FileEntry],
@@ -128,6 +139,11 @@ impl<'a> StatusView<'a> {
 
                 let is_selected = self.navigation.current_section() == section
                     && self.navigation.selected_index() == file_index;
+
+                // Track the list index of the selected item
+                if is_selected {
+                    *selected_list_index = Some(items.len());
+                }
 
                 let style = if is_selected {
                     Style::default()
@@ -175,6 +191,7 @@ impl<'a> StatusView<'a> {
         &self,
         items: &mut Vec<ListItem>,
         current_file_index: &mut usize,
+        selected_list_index: &mut Option<usize>,
         section: StatusSection,
         header: &str,
         files: &[String],
@@ -207,6 +224,11 @@ impl<'a> StatusView<'a> {
 
                 let is_selected = self.navigation.current_section() == section
                     && self.navigation.selected_index() == file_index;
+
+                // Track the list index of the selected item
+                if is_selected {
+                    *selected_list_index = Some(items.len());
+                }
 
                 let style = if is_selected {
                     Style::default()

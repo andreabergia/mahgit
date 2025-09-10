@@ -360,7 +360,7 @@ impl App {
         }
     }
 
-    pub fn render(&self, f: &mut ratatui::Frame) {
+    pub fn render(&mut self, f: &mut ratatui::Frame) {
         let area = f.area();
 
         // Always render the status view (now with inline diffs)
