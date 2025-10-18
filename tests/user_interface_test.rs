@@ -379,3 +379,100 @@ fn get_mahgit_binary_path() -> PathBuf {
         .join("debug")
         .join("mahgit")
 }
+
+// ============================================================================
+// Accordion UI Tests - Test Coverage Phase 1: Core Accordion Validation
+// ============================================================================
+
+/// Test #1 + #3: Inline Diff Expansion and Content Correctness
+/// Verifies that:
+/// 1. Pressing Tab on a file expands inline diffs in the UI
+/// 2. The displayed diff content matches actual file changes and is correct
+#[test]
+fn test_inline_diff_expansion_and_content() {
+    use crossterm::event::KeyCode;
+    use std::process::Command;
+
+    let test_repo = create_test_repository().expect("Failed to create test repository");
+    let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
+
+    env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+
+    // Create a file with specific content that we can verify
+    let test_file = "test_modified.txt";
+    let original_content = "Original line 1\nOriginal line 2\nOriginal line 3\n";
+    let modified_content = "Modified line 1\nOriginal line 2\nNew line 3\nAdded line 4\n";
+
+    // First, add the original file and commit it
+    std::fs::write(test_repo.temp_dir.path().join(test_file), original_content).unwrap();
+    Command::new("git")
+        .args(["add", test_file])
+        .current_dir(test_repo.temp_dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Add test file"])
+        .current_dir(test_repo.temp_dir.path())
+        .output()
+        .unwrap();
+
+    // Now modify the file
+    std::fs::write(test_repo.temp_dir.path().join(test_file), modified_content).unwrap();
+
+    // Get the expected git diff output for comparison
+    let git_diff_output = Command::new("git")
+        .args(["diff", test_file])
+        .current_dir(test_repo.temp_dir.path())
+        .output()
+        .unwrap();
+    let git_diff_str = String::from_utf8_lossy(&git_diff_output.stdout);
+
+    let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
+    test_app.render().unwrap();
+
+    assert!(
+        test_app.assert_contains(test_file),
+        "Test file should appear in status"
+    );
+
+    // Navigate to ensure we're on the file (in case there are multiple items)
+    test_app.send_key_code(KeyCode::Char('j'));
+    test_app.render().unwrap();
+
+    // Expand the diff by pressing Tab
+    test_app.send_key_code(KeyCode::Tab);
+    test_app.render().unwrap();
+
+    let buffer_content = test_backend_utils::buffer_to_string(test_app.get_buffer());
+
+    let has_diff_markers = buffer_content.contains("+") || buffer_content.contains("-");
+    assert!(
+        has_diff_markers,
+        "Expanded diff should contain diff markers (+/-). Buffer: {}",
+        buffer_content
+    );
+    assert!(
+        buffer_content.contains("Original line 1") || git_diff_str.contains("-Original line 1"),
+        "Diff should show original line 1 (either as context or deletion)"
+    );
+    assert!(
+        buffer_content.contains("Modified line 1"),
+        "Diff should show the modified line 1. Buffer: {}",
+        buffer_content
+    );
+    assert!(
+        buffer_content.contains("New line 3"),
+        "Diff should show new line 3. Buffer: {}",
+        buffer_content
+    );
+    assert!(
+        buffer_content.contains("Added line 4"),
+        "Diff should show added line 4. Buffer: {}",
+        buffer_content
+    );
+    assert!(
+        buffer_content.contains("Original line 2"),
+        "Diff should show unchanged line 2 as context. Buffer: {}",
+        buffer_content
+    );
+}

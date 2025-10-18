@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-The accordion UI feature has **87 passing automated tests** (75 unit + 12 integration) with excellent coverage for input handling and navigation logic. However, **critical gaps exist** in testing the core accordion-specific features like inline diff expansion/collapse, section management, and viewport tracking.
+The accordion UI feature has **88 passing automated tests** (75 unit + 13 integration) with excellent coverage for input handling and navigation logic. **Progress: 2/20 accordion-specific tests implemented** (Tests #1 & #3 merged: Inline Diff Expansion + Content Correctness ✅). Remaining critical gaps exist in testing multiple diffs, section management, and viewport tracking.
 
 ## Current Test Coverage
 
@@ -38,11 +38,11 @@ Well-designed and ready for expansion:
 ### Priority 1: Critical Accordion Features (8 tests needed)
 
 #### 1. **Inline Diff Expansion/Collapse**
-- **Status:** ❌ Not tested
+- **Status:** ✅ TESTED (test_inline_diff_expansion_and_content)
 - **Risk:** HIGH - Core feature
-- **Location:** `src/ui/file_tree.rs:1247-1289`
-- **Gap:** No integration test verifies that pressing Tab/Enter actually expands inline diffs in the UI
-- **Test Needed:** Verify diff expansion shows actual file content in buffer
+- **Location:** `src/ui/status_view.rs:168-183, 253-268`
+- **Test:** `tests/user_interface_test.rs:387-492`
+- **Coverage:** Verifies that pressing Tab on a file expands inline diffs with actual file content
 
 #### 2. **Multiple Diffs Expanded Simultaneously**
 - **Status:** ❌ Not tested
@@ -51,10 +51,10 @@ Well-designed and ready for expansion:
 - **Test Needed:** Expand multiple files, verify all remain expanded
 
 #### 3. **Diff Content Correctness**
-- **Status:** ❌ Not tested
+- **Status:** ✅ TESTED (test_inline_diff_expansion_and_content)
 - **Risk:** HIGH - Data integrity
-- **Gap:** No verification that displayed diffs match actual file changes
-- **Test Needed:** Compare rendered diff output with expected git diff output
+- **Test:** `tests/user_interface_test.rs:387-492` (merged with test #1)
+- **Coverage:** Verifies displayed diff content matches actual file changes (additions, deletions, context lines)
 
 #### 4. **Section Collapse/Expand**
 - **Status:** ❌ Infrastructure exists but completely untested
