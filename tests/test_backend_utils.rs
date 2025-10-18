@@ -142,6 +142,18 @@ impl TestApp {
         self.render()?;
         Ok(())
     }
+
+    /// Access the app's navigation state (for testing)
+    #[allow(dead_code)]
+    pub fn navigation(&self) -> &mahgit::ui::navigation::NavigationState {
+        self.app.navigation()
+    }
+
+    /// Toggle section collapsed state (for testing)
+    #[allow(dead_code)]
+    pub fn toggle_section_collapsed(&mut self, section: mahgit::ui::navigation::StatusSection) {
+        self.app.toggle_section_collapsed(section);
+    }
 }
 
 /// Helper function to convert buffer to string representation

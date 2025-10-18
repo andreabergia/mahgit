@@ -58,15 +58,18 @@ impl App {
         self.should_quit
     }
 
-    // Getters for testing
-    #[cfg(test)]
+    // Getters for testing - exposed even in non-test builds for integration tests
     pub fn status(&self) -> &RepositoryStatus {
         &self.status
     }
 
-    #[cfg(test)]
     pub fn navigation(&self) -> &NavigationState {
         &self.navigation
+    }
+
+    /// Toggle section collapsed state (for testing purposes)
+    pub fn toggle_section_collapsed(&mut self, section: navigation::StatusSection) {
+        self.navigation.toggle_section_collapsed(section);
     }
 
     /// Force refresh the repository status (for testing purposes)

@@ -6,7 +6,11 @@
 
 ## Executive Summary
 
-The accordion UI feature has **88 passing automated tests** (75 unit + 13 integration) with excellent coverage for input handling and navigation logic. **Progress: 2/20 accordion-specific tests implemented** (Tests #1 & #3 merged: Inline Diff Expansion + Content Correctness ✅). Remaining critical gaps exist in testing multiple diffs, section management, and viewport tracking.
+The accordion UI feature has **89 passing automated tests** (75 unit + 14 integration) with excellent coverage for input handling and navigation logic. **Progress: 3/20 accordion-specific tests implemented**:
+- ✅ Test #1 & #3 (merged): Inline Diff Expansion + Content Correctness
+- ✅ Test #4: Section Collapse/Expand
+
+Remaining critical gaps exist in testing multiple diffs simultaneously, tab key context-aware toggling, enter/backspace shortcuts, and viewport tracking.
 
 ## Current Test Coverage
 
@@ -57,10 +61,16 @@ Well-designed and ready for expansion:
 - **Coverage:** Verifies displayed diff content matches actual file changes (additions, deletions, context lines)
 
 #### 4. **Section Collapse/Expand**
-- **Status:** ❌ Infrastructure exists but completely untested
-- **Location:** `src/ui/file_tree.rs:265-310` (rendering), `src/app_state.rs:116-127` (toggling)
-- **Gap:** Section headers render but collapse/expand behavior never verified
-- **Test Needed:** Toggle sections, verify visibility changes
+- **Status:** ✅ TESTED (test_section_collapse_expand)
+- **Location:** `src/ui/status_view.rs:123-188,203-273` (rendering), `src/ui/navigation.rs:224-237` (toggling)
+- **Test:** `tests/user_interface_test.rs:387-623`
+- **Coverage:** Verifies section collapse/expand functionality:
+  - Sections start expanded by default
+  - Programmatic toggling via `toggle_section_collapsed()`
+  - State changes stored correctly in `NavigationState`
+  - Files hidden when section collapsed, visible when expanded
+  - Collapse icons change correctly ("▼" ↔ "▶")
+  - Multiple sections can be collapsed/expanded independently
 
 #### 5. **Tab Key Context-Aware Toggling**
 - **Status:** ⚠️ Unit tested, not integration tested
@@ -168,29 +178,35 @@ The following features from the manual test report are **completely unimplemente
 Implement tests 1-8 to validate the core accordion functionality:
 ```rust
 #[test]
-fn test_inline_diff_expansion() {
+fn test_inline_diff_expansion_and_content() {
+    // ✅ IMPLEMENTED at tests/user_interface_test.rs:625-716
+    // (tests #1 and #3 merged)
     // Create test repo with modified file
-    // Select file, press Tab
+    // Press Tab to expand diff
     // Assert diff content appears in rendered buffer
-}
-
-#[test]
-fn test_multiple_diffs_expanded() {
-    // Expand file A, expand file B
-    // Assert both remain expanded
-}
-
-#[test]
-fn test_diff_content_correctness() {
-    // Create known file changes
-    // Expand diff
-    // Assert rendered content matches expected diff output
+    // Assert diff content matches git diff output
 }
 
 #[test]
 fn test_section_collapse_expand() {
-    // Toggle section
-    // Assert items visibility changes
+    // ✅ IMPLEMENTED at tests/user_interface_test.rs:387-623
+    // Create repo with multiple sections (Staged, Unstaged, Untracked)
+    // Verify sections start expanded (default state)
+    // Programmatically toggle section to collapsed
+    // Verify state change and rendering:
+    //   - is_section_collapsed() returns true
+    //   - Files in collapsed section NOT in buffer
+    //   - Collapse icon changes from "▼" to "▶"
+    // Toggle back to expanded
+    // Verify files reappear and icon changes back to "▼"
+    // Test multiple sections independently
+}
+
+#[test]
+fn test_multiple_diffs_expanded() {
+    // ❌ NOT YET IMPLEMENTED
+    // Expand file A, expand file B
+    // Assert both remain expanded
 }
 ```
 
@@ -248,17 +264,22 @@ fn create_repo_with_large_diff() -> (TempDir, Repository) {
 | Core navigation | ✓✓✓ High | Well tested with 75+ unit tests |
 | Input handling | ✓✓✓ High | Comprehensive keyboard event tests |
 | Basic UI rendering | ✓✓ Medium | Integration tests exist but limited |
-| **Accordion expand/collapse** | ✗ **Low** | **No integration tests** |
-| **Section management** | ✗ **Low** | **Infrastructure untested** |
-| **Diff content accuracy** | ✗ **Low** | **Not verified** |
+| **Accordion expand/collapse** | ✓✓ **Medium** | **Integration test added** |
+| **Section management** | ✓✓ **Medium** | **Integration test added** |
+| **Diff content accuracy** | ✓✓ **Medium** | **Integration test added** |
 | Viewport tracking | ✓ Medium | Logic exists, not tested |
 | Performance | ? Unknown | No performance tests |
 
 ## Conclusion
 
-The accordion UI feature has **solid foundational testing** for navigation and input handling, but **lacks critical integration tests** for the accordion-specific behaviors that make it valuable. The existing test infrastructure is excellent and ready to support comprehensive accordion testing.
+The accordion UI feature has **solid foundational testing** for navigation and input handling. **Progress: 3/8 Priority 1 tests completed** (Tests #1, #3, and #4). The existing test infrastructure is excellent and ready to support comprehensive accordion testing.
 
-**Immediate Action Required:** Implement the 8 Priority 1 tests to validate core accordion functionality before considering the feature production-ready.
+**Remaining Priority 1 Gaps:** Implement the remaining 5 tests (#2, #5-#8) to validate:
+- Multiple diffs expanded simultaneously
+- Tab key context-aware toggling
+- Enter key expanding
+- Backspace collapsing
+- Section traversal navigation
 
 ## References
 

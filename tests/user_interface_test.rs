@@ -380,9 +380,235 @@ fn get_mahgit_binary_path() -> PathBuf {
         .join("mahgit")
 }
 
-// ============================================================================
-// Accordion UI Tests - Test Coverage Phase 1: Core Accordion Validation
-// ============================================================================
+#[test]
+fn test_section_collapse_expand() {
+    use mahgit::ui::navigation::StatusSection;
+    use std::process::Command;
+
+    let test_repo = create_test_repository().expect("Failed to create test repository");
+    let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
+
+    env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+
+    // Create files in different sections to test section collapsing
+    // 1. Create an unstaged file
+    let unstaged_file = "unstaged_file.txt";
+    std::fs::write(
+        test_repo.temp_dir.path().join(unstaged_file),
+        "unstaged content\n",
+    )
+    .unwrap();
+    Command::new("git")
+        .args(["add", unstaged_file])
+        .current_dir(test_repo.temp_dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Add unstaged file"])
+        .current_dir(test_repo.temp_dir.path())
+        .output()
+        .unwrap();
+    // Modify it to create unstaged changes
+    std::fs::write(
+        test_repo.temp_dir.path().join(unstaged_file),
+        "modified unstaged content\n",
+    )
+    .unwrap();
+
+    // 2. Create an untracked file
+    let untracked_file = "untracked_file.txt";
+    std::fs::write(
+        test_repo.temp_dir.path().join(untracked_file),
+        "untracked content\n",
+    )
+    .unwrap();
+
+    // 3. Create a staged file
+    let staged_file = "staged_file.txt";
+    std::fs::write(
+        test_repo.temp_dir.path().join(staged_file),
+        "staged content\n",
+    )
+    .unwrap();
+    Command::new("git")
+        .args(["add", staged_file])
+        .current_dir(test_repo.temp_dir.path())
+        .output()
+        .unwrap();
+
+    let mut test_app = TestApp::with_repository(80, 30, repository).unwrap();
+    test_app.render().unwrap();
+
+    // Verify all sections start expanded (default state)
+    assert!(
+        !test_app
+            .navigation()
+            .is_section_collapsed(StatusSection::Unstaged),
+        "Unstaged section should start expanded"
+    );
+    assert!(
+        !test_app
+            .navigation()
+            .is_section_collapsed(StatusSection::Untracked),
+        "Untracked section should start expanded"
+    );
+    assert!(
+        !test_app
+            .navigation()
+            .is_section_collapsed(StatusSection::Staged),
+        "Staged section should start expanded"
+    );
+
+    // Verify files are visible in expanded sections
+    let buffer_content = test_backend_utils::buffer_to_string(test_app.get_buffer());
+    assert!(
+        buffer_content.contains(unstaged_file),
+        "Unstaged file should be visible when section is expanded"
+    );
+    assert!(
+        buffer_content.contains(untracked_file),
+        "Untracked file should be visible when section is expanded"
+    );
+    assert!(
+        buffer_content.contains(staged_file),
+        "Staged file should be visible when section is expanded"
+    );
+
+    // Verify expanded icon "▼" appears
+    assert!(
+        buffer_content.contains("▼"),
+        "Expanded sections should show ▼ icon"
+    );
+
+    // Test 1: Collapse the Unstaged section
+    test_app.toggle_section_collapsed(StatusSection::Unstaged);
+    test_app.render().unwrap();
+
+    assert!(
+        test_app
+            .navigation()
+            .is_section_collapsed(StatusSection::Unstaged),
+        "Unstaged section should be collapsed after toggle"
+    );
+
+    let buffer_content = test_backend_utils::buffer_to_string(test_app.get_buffer());
+    assert!(
+        !buffer_content.contains(unstaged_file),
+        "Unstaged file should NOT be visible when section is collapsed. Buffer: {}",
+        buffer_content
+    );
+    // Other sections should still show their files
+    assert!(
+        buffer_content.contains(untracked_file),
+        "Untracked file should still be visible"
+    );
+    assert!(
+        buffer_content.contains(staged_file),
+        "Staged file should still be visible"
+    );
+    // Verify collapsed icon "▶" appears for Unstaged section
+    assert!(
+        buffer_content.contains("▶"),
+        "Collapsed section should show ▶ icon"
+    );
+
+    // Test 2: Collapse the Untracked section (while Unstaged remains collapsed)
+    test_app.toggle_section_collapsed(StatusSection::Untracked);
+    test_app.render().unwrap();
+
+    assert!(
+        test_app
+            .navigation()
+            .is_section_collapsed(StatusSection::Untracked),
+        "Untracked section should be collapsed after toggle"
+    );
+
+    let buffer_content = test_backend_utils::buffer_to_string(test_app.get_buffer());
+    assert!(
+        !buffer_content.contains(unstaged_file),
+        "Unstaged file should still NOT be visible (section still collapsed)"
+    );
+    assert!(
+        !buffer_content.contains(untracked_file),
+        "Untracked file should NOT be visible when section is collapsed"
+    );
+    // Staged section should still show its files
+    assert!(
+        buffer_content.contains(staged_file),
+        "Staged file should still be visible"
+    );
+
+    // Test 3: Expand the Unstaged section back
+    test_app.toggle_section_collapsed(StatusSection::Unstaged);
+    test_app.render().unwrap();
+
+    assert!(
+        !test_app
+            .navigation()
+            .is_section_collapsed(StatusSection::Unstaged),
+        "Unstaged section should be expanded after second toggle"
+    );
+
+    let buffer_content = test_backend_utils::buffer_to_string(test_app.get_buffer());
+    assert!(
+        buffer_content.contains(unstaged_file),
+        "Unstaged file should be visible again when section is re-expanded"
+    );
+    // Untracked should still be collapsed
+    assert!(
+        !buffer_content.contains(untracked_file),
+        "Untracked file should still NOT be visible (section still collapsed)"
+    );
+    assert!(
+        buffer_content.contains(staged_file),
+        "Staged file should still be visible"
+    );
+
+    // Test 4: Expand the Untracked section back
+    test_app.toggle_section_collapsed(StatusSection::Untracked);
+    test_app.render().unwrap();
+
+    assert!(
+        !test_app
+            .navigation()
+            .is_section_collapsed(StatusSection::Untracked),
+        "Untracked section should be expanded after second toggle"
+    );
+
+    let buffer_content = test_backend_utils::buffer_to_string(test_app.get_buffer());
+    assert!(
+        buffer_content.contains(unstaged_file),
+        "Unstaged file should still be visible"
+    );
+    assert!(
+        buffer_content.contains(untracked_file),
+        "Untracked file should be visible again when section is re-expanded"
+    );
+    assert!(
+        buffer_content.contains(staged_file),
+        "Staged file should still be visible"
+    );
+
+    // All sections should now be expanded again
+    assert!(
+        !test_app
+            .navigation()
+            .is_section_collapsed(StatusSection::Unstaged),
+        "Unstaged section should be expanded at end"
+    );
+    assert!(
+        !test_app
+            .navigation()
+            .is_section_collapsed(StatusSection::Untracked),
+        "Untracked section should be expanded at end"
+    );
+    assert!(
+        !test_app
+            .navigation()
+            .is_section_collapsed(StatusSection::Staged),
+        "Staged section should remain expanded throughout"
+    );
+}
 
 /// Test #1 + #3: Inline Diff Expansion and Content Correctness
 /// Verifies that:
