@@ -23,6 +23,7 @@ pub enum Command {
     // View commands
     EnterDiffView,
     ExitDiffView,
+    OpenInEditor,
 
     // Accordion commands
     ToggleAccordion, // Contextual Tab key behavior
@@ -129,7 +130,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::EnterDiffView
+                Command::OpenInEditor
             }
 
             KeyEvent {
@@ -269,8 +270,8 @@ impl InputHandler {
             "  G/End   Jump to bottom / Bottom of diff",
             "",
             "Section & Diff Navigation:",
-            "  Tab     Toggle section collapsed/expanded",
-            "  Enter   Enter diff view",
+            "  Tab     Toggle section collapsed/expanded or toggle inline diff",
+            "  Enter   Open file in editor",
             "  f/PgDn  Page down in diff",
             "  b/PgUp  Page up in diff",
             "  n/→     Jump to next hunk",

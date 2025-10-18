@@ -7,6 +7,7 @@ pub mod status_view;
 
 use crate::diff::DiffGenerator;
 use crate::operations::StagingOperations;
+use crate::operations::editor;
 use crate::repository::Repository;
 use crate::status::RepositoryStatus;
 use crossterm::{
@@ -178,6 +179,9 @@ impl App {
             }
             Command::ExitDiffView => {
                 // No longer needed - inline diffs don't have exit
+            }
+            Command::OpenInEditor => {
+                self.open_file_in_editor();
             }
             Command::ToggleAccordion => {
                 self.toggle_accordion();
@@ -463,6 +467,88 @@ impl App {
         // Render the list content in the margin-adjusted area
         let help_list = List::new(help_items);
         f.render_widget(help_list, content_area);
+    }
+
+    fn open_file_in_editor(&mut self) {
+        if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+            // Get the repository's working directory
+            let workdir = match self.repository.git2_repo().workdir() {
+                Some(dir) => dir,
+                None => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(
+                            "Repository has no working directory".to_string(),
+                        ));
+                    return;
+                }
+            };
+
+            // Build the full path to the file
+            let file_path = workdir.join(&selected_file.path);
+            let file_path_str = match file_path.to_str() {
+                Some(s) => s,
+                None => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(
+                            "Invalid file path".to_string(),
+                        ));
+                    return;
+                }
+            };
+
+            // Suspend terminal before opening editor
+            if let Err(e) = self.suspend_terminal() {
+                self.feedback_manager
+                    .show_result(crate::operations::OperationResult::new(format!(
+                        "Failed to suspend terminal: {}",
+                        e
+                    )));
+                return;
+            }
+
+            // Open the file in the editor
+            let editor_result = editor::open_file_in_editor(&self.repository, file_path_str);
+
+            // Restore terminal after editor exits
+            if let Err(e) = self.resume_terminal() {
+                eprintln!("Failed to resume terminal: {}", e);
+                std::process::exit(1);
+            }
+
+            // Handle the editor result
+            match editor_result {
+                Ok(success) => {
+                    if success {
+                        // Refresh status after editing in case the file was modified
+                        self.refresh_status();
+                    } else {
+                        self.feedback_manager
+                            .show_result(crate::operations::OperationResult::new(
+                                "Editor exited with error".to_string(),
+                            ));
+                    }
+                }
+                Err(err) => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(format!(
+                            "Failed to open editor: {}",
+                            err
+                        )));
+                }
+            }
+        }
+    }
+
+    fn suspend_terminal(&self) -> Result<(), Box<dyn std::error::Error>> {
+        disable_raw_mode()?;
+        execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+        Ok(())
+    }
+
+    fn resume_terminal(&self) -> Result<(), Box<dyn std::error::Error>> {
+        execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+        enable_raw_mode()?;
+        Ok(())
     }
 
     // TODO: Implement inline hunk staging methods

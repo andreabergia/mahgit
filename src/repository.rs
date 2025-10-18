@@ -42,6 +42,12 @@ impl Repository {
         Ok(Repository { git_repo })
     }
 
+    /// Create a Repository from an existing Git2Repository (useful for tests)
+    #[cfg(test)]
+    pub fn from_git2_repo(git_repo: Git2Repository) -> Self {
+        Repository { git_repo }
+    }
+
     pub fn current_branch_name(&self) -> Result<String, RepositoryError> {
         let head = self
             .git_repo
