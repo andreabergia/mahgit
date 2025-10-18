@@ -32,6 +32,9 @@ This is "mahgit", a Rust-based terminal Git interface that aims to replicate Mag
 - Use the `.tmp/` directory for temporary test files and repositories
 - Never use `/tmp` - always use the project's `.tmp/` directory for testing
 
+### Commit rules
+Do not give Claude attribution in the message. Try to keep message concise.
+
 ## Architecture and Technology Stack
 
 **Core Dependencies (planned)**:
