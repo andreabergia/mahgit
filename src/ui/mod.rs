@@ -6,6 +6,7 @@ pub mod navigation;
 pub mod status_view;
 
 use crate::diff::DiffGenerator;
+use crate::operations::HunkStager;
 use crate::operations::StagingOperations;
 use crate::operations::editor;
 use crate::repository::Repository;
@@ -142,10 +143,18 @@ impl App {
     fn handle_command(&mut self, command: Command) {
         match command {
             Command::MoveUp => {
-                self.navigation.move_up();
+                if self.is_inline_diff_active() {
+                    self.inline_prev_hunk();
+                } else {
+                    self.navigation.move_up();
+                }
             }
             Command::MoveDown => {
-                self.navigation.move_down();
+                if self.is_inline_diff_active() {
+                    self.inline_next_hunk();
+                } else {
+                    self.navigation.move_down();
+                }
             }
             Command::MoveToTop => {
                 self.navigation.move_to_top();
@@ -187,28 +196,30 @@ impl App {
                 self.toggle_accordion();
             }
             Command::ScrollDiffUp => {
-                // TODO: Implement inline diff scrolling
+                self.inline_prev_hunk();
             }
             Command::ScrollDiffDown => {
-                // TODO: Implement inline diff scrolling
+                self.inline_next_hunk();
             }
             Command::PageDiffUp => {
-                // TODO: Implement inline diff paging
+                // For inline diff, page up = previous hunk
+                self.inline_prev_hunk();
             }
             Command::PageDiffDown => {
-                // TODO: Implement inline diff paging
+                // For inline diff, page down = next hunk
+                self.inline_next_hunk();
             }
             Command::JumpToNextHunk => {
-                // TODO: Implement inline hunk navigation
+                self.inline_next_hunk();
             }
             Command::JumpToPreviousHunk => {
-                // TODO: Implement inline hunk navigation
+                self.inline_prev_hunk();
             }
             Command::NextHunk => {
-                // TODO: Implement inline hunk navigation
+                self.inline_next_hunk();
             }
             Command::PreviousHunk => {
-                // TODO: Implement inline hunk navigation
+                self.inline_prev_hunk();
             }
             Command::GoToTopOfDiff => {
                 // TODO: Implement inline diff navigation
@@ -217,10 +228,10 @@ impl App {
                 // TODO: Implement inline diff navigation
             }
             Command::StageHunk => {
-                // TODO: Implement inline hunk staging
+                self.inline_stage_current_hunk();
             }
             Command::UnstageHunk => {
-                // TODO: Implement inline hunk staging
+                self.inline_stage_current_hunk();
             }
             Command::Unknown => {
                 // Ignore unknown commands
@@ -356,6 +367,32 @@ impl App {
         }
     }
 
+    fn is_inline_diff_active(&self) -> bool {
+        if let Some(sel) = self.navigation.get_selected_file(&self.status) {
+            if let Some(state) = self.navigation.get_file_diff(&sel.path) {
+                return state.expanded
+                    && state
+                        .diff
+                        .as_ref()
+                        .map(|d| !d.hunks.is_empty())
+                        .unwrap_or(false);
+            }
+        }
+        false
+    }
+
+    fn inline_next_hunk(&mut self) {
+        if let Some(sel) = self.navigation.get_selected_file(&self.status) {
+            self.navigation.next_inline_hunk(&sel.path);
+        }
+    }
+
+    fn inline_prev_hunk(&mut self) {
+        if let Some(sel) = self.navigation.get_selected_file(&self.status) {
+            self.navigation.prev_inline_hunk(&sel.path);
+        }
+    }
+
     fn determine_diff_context(&self, file: &SelectedFile) -> crate::diff::DiffContext {
         use navigation::FileContext;
 
@@ -364,6 +401,79 @@ impl App {
             FileContext::Unstaged => crate::diff::DiffContext::WorkingTreeToIndex,
             FileContext::Untracked => crate::diff::DiffContext::WorkingTreeToIndex,
             FileContext::Conflicted => crate::diff::DiffContext::WorkingTreeToHead,
+        }
+    }
+
+    fn inline_stage_current_hunk(&mut self) {
+        use navigation::FileContext;
+        if let Some(sel) = self.navigation.get_selected_file(&self.status) {
+            if let Some(state) = self.navigation.get_file_diff(&sel.path) {
+                if let Some(diff) = &state.diff {
+                    let idx = state.current_hunk.min(diff.hunks.len().saturating_sub(1));
+                    if let Some(hunk) = diff.hunks.get(idx) {
+                        let stager = HunkStager::new(&self.repository);
+                        let res = match sel.context {
+                            FileContext::Unstaged | FileContext::Untracked => {
+                                stager.stage_hunk(&sel.path, hunk)
+                            }
+                            FileContext::Staged => stager.unstage_hunk(&sel.path, hunk),
+                            FileContext::Conflicted => {
+                                Err(crate::repository::RepositoryError::Other(
+                                    "Cannot modify conflicted files".into(),
+                                ))
+                            }
+                        };
+                        match res {
+                            Ok(r) => {
+                                // Preserve selection and move to next hunk after refresh
+                                let file_path = sel.path.clone();
+                                let prev_index = state.current_hunk;
+                                let prev_ctx = state.diff_context.clone();
+
+                                self.feedback_manager.show_result(r);
+                                self.refresh_status_after_operation();
+
+                                // Regenerate and re-expand inline diff for the same file
+                                let diff_generator =
+                                    crate::diff::DiffGenerator::new(self.repository.git2_repo());
+                                if let Ok(new_diff) =
+                                    diff_generator.generate_diff(&file_path, prev_ctx.clone())
+                                {
+                                    self.navigation.set_file_diff(
+                                        file_path.clone(),
+                                        new_diff,
+                                        prev_ctx,
+                                    );
+                                    // Move selection to next hunk (same index after removal), clamp
+                                    if let Some(state2) = self.navigation.get_file_diff(&file_path)
+                                    {
+                                        let len = state2
+                                            .diff
+                                            .as_ref()
+                                            .map(|d| d.hunks.len())
+                                            .unwrap_or(0);
+                                        let next = if len == 0 {
+                                            0
+                                        } else {
+                                            prev_index.min(len.saturating_sub(1))
+                                        };
+                                        self.navigation
+                                            .set_current_inline_hunk_index(&file_path, next);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                self.feedback_manager.show_result(
+                                    crate::operations::OperationResult::new(format!(
+                                        "Hunk operation failed: {}",
+                                        e
+                                    )),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

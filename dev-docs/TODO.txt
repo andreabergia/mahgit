@@ -1,0 +1,4 @@
+- when viewing a diff, staging file moves to the next file. space bar should be next page maybe?
+- mouse scroll in diff view
+- scroll when diff is big
+- refresh ui after operation

@@ -170,7 +170,11 @@ impl<'a> StatusView<'a> {
                     && diff_state.expanded
                 {
                     if let Some(diff) = &diff_state.diff {
-                        self.add_inline_diff_items(items, diff);
+                        self.add_inline_diff_items_with_selection(
+                            items,
+                            diff,
+                            diff_state.current_hunk,
+                        );
                     } else {
                         // Show loading placeholder
                         items.push(ListItem::new(Line::from(Span::styled(
@@ -255,7 +259,11 @@ impl<'a> StatusView<'a> {
                     && diff_state.expanded
                 {
                     if let Some(diff) = &diff_state.diff {
-                        self.add_inline_diff_items(items, diff);
+                        self.add_inline_diff_items_with_selection(
+                            items,
+                            diff,
+                            diff_state.current_hunk,
+                        );
                     } else {
                         // Show loading placeholder
                         items.push(ListItem::new(Line::from(Span::styled(
@@ -287,6 +295,56 @@ impl<'a> StatusView<'a> {
             StatusSection::Unstaged => Style::default().fg(Color::Red),
             StatusSection::Untracked => Style::default().fg(Color::Magenta),
             StatusSection::Conflicted => Style::default().fg(Color::Yellow),
+        }
+    }
+
+    fn add_inline_diff_items_with_selection(
+        &self,
+        items: &mut Vec<ListItem>,
+        diff: &Diff,
+        selected_hunk: usize,
+    ) {
+        // Check for binary files
+        if diff.binary {
+            items.push(ListItem::new(Line::from(Span::styled(
+                "    Binary file (not shown)",
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC),
+            ))));
+            return;
+        }
+
+        for (idx, hunk) in diff.hunks.iter().enumerate() {
+            // Hunk header with indentation and selection highlight
+            let header_style = if idx == selected_hunk {
+                Style::default().fg(Color::Cyan).bg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM)
+            };
+            items.push(ListItem::new(Line::from(Span::styled(
+                format!("    {}", hunk.header.raw),
+                header_style,
+            ))));
+
+            // Diff lines with deeper indentation
+            for line in &hunk.lines {
+                let (prefix, color) = match line.line_type {
+                    LineType::Addition => ("+", Color::Green),
+                    LineType::Deletion => ("-", Color::Red),
+                    LineType::Context => (" ", Color::White),
+                    LineType::NoNewlineEOF => ("\\", Color::Yellow),
+                };
+
+                items.push(ListItem::new(Line::from(Span::styled(
+                    format!("      {}{}", prefix, line.content),
+                    Style::default().fg(color),
+                ))));
+            }
+
+            if diff.hunks.len() > 1 {
+                items.push(ListItem::new(Line::from("")));
+            }
         }
     }
 

@@ -185,14 +185,29 @@ impl<'repo> HunkStager<'repo> {
 
         // Write hunk lines
         for line in &hunk.lines {
-            let prefix = match line.line_type {
-                LineType::Addition => "+",
-                LineType::Deletion => "-",
-                LineType::Context => " ",
-                LineType::NoNewlineEOF => "\\",
-            };
-
-            writeln!(patch, "{}{}", prefix, line.content).map_err(RepositoryError::IoError)?;
+            match line.line_type {
+                LineType::NoNewlineEOF => {
+                    // Unified diff marker line
+                    writeln!(patch, "\\ No newline at end of file")
+                        .map_err(RepositoryError::IoError)?;
+                }
+                _ => {
+                    let prefix = match line.line_type {
+                        LineType::Addition => "+",
+                        LineType::Deletion => "-",
+                        LineType::Context => " ",
+                        LineType::NoNewlineEOF => unreachable!(),
+                    };
+                    let content = &line.content;
+                    if content.ends_with('\n') {
+                        // content already newline-terminated; avoid double newline
+                        write!(patch, "{}{}", prefix, content).map_err(RepositoryError::IoError)?;
+                    } else {
+                        writeln!(patch, "{}{}", prefix, content)
+                            .map_err(RepositoryError::IoError)?;
+                    }
+                }
+            }
         }
 
         Ok(patch)
@@ -227,14 +242,27 @@ impl<'repo> HunkStager<'repo> {
 
         // Write hunk lines with reversed operations
         for line in &hunk.lines {
-            let prefix = match line.line_type {
-                LineType::Addition => "-", // Reverse: additions become deletions
-                LineType::Deletion => "+", // Reverse: deletions become additions
-                LineType::Context => " ",  // Context lines stay the same
-                LineType::NoNewlineEOF => "\\",
-            };
-
-            writeln!(patch, "{}{}", prefix, line.content).map_err(RepositoryError::IoError)?;
+            match line.line_type {
+                LineType::NoNewlineEOF => {
+                    writeln!(patch, "\\ No newline at end of file")
+                        .map_err(RepositoryError::IoError)?;
+                }
+                _ => {
+                    let prefix = match line.line_type {
+                        LineType::Addition => "-", // Reverse: additions become deletions
+                        LineType::Deletion => "+", // Reverse: deletions become additions
+                        LineType::Context => " ",  // Context lines stay the same
+                        LineType::NoNewlineEOF => unreachable!(),
+                    };
+                    let content = &line.content;
+                    if content.ends_with('\n') {
+                        write!(patch, "{}{}", prefix, content).map_err(RepositoryError::IoError)?;
+                    } else {
+                        writeln!(patch, "{}{}", prefix, content)
+                            .map_err(RepositoryError::IoError)?;
+                    }
+                }
+            }
         }
 
         Ok(patch)

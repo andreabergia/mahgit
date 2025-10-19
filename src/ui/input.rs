@@ -168,6 +168,22 @@ impl InputHandler {
                 self.clear_sequence_state();
                 Command::MoveToBottom
             }
+            KeyEvent {
+                code: KeyCode::Char('S'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                self.clear_sequence_state();
+                Command::StageHunk
+            }
+            KeyEvent {
+                code: KeyCode::Char('U'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                self.clear_sequence_state();
+                Command::UnstageHunk
+            }
 
             // Handle space key
             KeyEvent {

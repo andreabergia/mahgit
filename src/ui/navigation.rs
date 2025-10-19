@@ -38,6 +38,7 @@ pub struct InlineDiffState {
     pub diff_context: crate::diff::DiffContext,
     pub diff: Option<Diff>,
     pub expanded: bool,
+    pub current_hunk: usize,
 }
 
 pub struct NavigationState {
@@ -265,6 +266,7 @@ impl NavigationState {
                         diff_context,
                         diff: None,
                         expanded: true,
+                        current_hunk: 0,
                     },
                 );
             }
@@ -284,6 +286,7 @@ impl NavigationState {
                 diff_context,
                 diff: Some(diff),
                 expanded: true,
+                current_hunk: 0,
             },
         );
     }
@@ -305,6 +308,40 @@ impl NavigationState {
         // Return false for now - always toggle file diff
         // This preserves existing behavior while adding the infrastructure for future enhancement
         false
+    }
+
+    pub fn set_current_inline_hunk_index(&mut self, file_path: &str, idx: usize) {
+        if let Some(state) = self.file_diffs.get_mut(file_path) {
+            state.current_hunk = idx;
+        }
+    }
+
+    pub fn get_current_inline_hunk_index(&self, file_path: &str) -> Option<usize> {
+        self.file_diffs.get(file_path).map(|s| s.current_hunk)
+    }
+
+    pub fn next_inline_hunk(&mut self, file_path: &str) {
+        if let Some(state) = self.file_diffs.get_mut(file_path) {
+            if let Some(diff) = &state.diff {
+                if !diff.hunks.is_empty() {
+                    state.current_hunk = (state.current_hunk + 1) % diff.hunks.len();
+                }
+            }
+        }
+    }
+
+    pub fn prev_inline_hunk(&mut self, file_path: &str) {
+        if let Some(state) = self.file_diffs.get_mut(file_path) {
+            if let Some(diff) = &state.diff {
+                if !diff.hunks.is_empty() {
+                    state.current_hunk = if state.current_hunk == 0 {
+                        diff.hunks.len() - 1
+                    } else {
+                        state.current_hunk - 1
+                    };
+                }
+            }
+        }
     }
 
     pub fn remove_file_diff(&mut self, file_path: &str) {
