@@ -218,6 +218,57 @@ fn test_large_file_error_handling() {
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
 
+    /// Inline diff hunk navigation and staging selection behavior
+    #[test]
+    fn test_inline_hunk_nav_and_stage_advances_selection() {
+        use crossterm::event::KeyCode;
+
+        let test_repo = create_test_repository().expect("Failed to create test repository");
+        let repo = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
+        std::env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+
+        // Create a file with two separate hunks
+        let path = test_repo.temp_dir.path().join("multi_hunk.txt");
+        std::fs::write(&path, "a\nkeep\nc\n").unwrap();
+
+        // Stage initial file and commit so we can create unstaged changes
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(test_repo.temp_dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "base"])
+            .current_dir(test_repo.temp_dir.path())
+            .output()
+            .unwrap();
+
+        // Modify file to create two hunks (lines 1 and 3)
+        std::fs::write(&path, "A\nkeep\nC\n").unwrap();
+
+        let mut app = TestApp::with_repository(80, 24, repo).unwrap();
+        app.render().unwrap();
+
+        // Toggle inline diff on the first visible file via Tab
+        app.send_key_code(KeyCode::Tab);
+        app.render().unwrap();
+
+        // Go to next hunk (should move from hunk 0 to 1)
+        app.send_char('n');
+        app.render().unwrap();
+
+        // Stage current hunk (Shift+S)
+        app.send_key(KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT));
+        app.render().unwrap();
+
+        // After staging a hunk, inline diff should still be visible
+        let buffer = test_backend_utils::buffer_to_string(app.get_buffer());
+        assert!(
+            buffer.contains("@@"),
+            "Inline diff should remain expanded after staging"
+        );
+    }
+
     env::set_current_dir(test_repo.temp_dir.path()).unwrap();
 
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
