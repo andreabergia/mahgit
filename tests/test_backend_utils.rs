@@ -44,6 +44,7 @@ impl TestApp {
     }
 
     /// Sends a mouse event to the app
+    #[allow(dead_code)]
     pub fn send_mouse(&mut self, mouse_event: MouseEvent) {
         self.app.process_mouse_event(mouse_event);
     }

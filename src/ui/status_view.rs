@@ -347,46 +347,4 @@ impl<'a> StatusView<'a> {
             }
         }
     }
-
-    fn add_inline_diff_items(&self, items: &mut Vec<ListItem>, diff: &Diff) {
-        // Check for binary files
-        if diff.binary {
-            items.push(ListItem::new(Line::from(Span::styled(
-                "    Binary file (not shown)",
-                Style::default()
-                    .fg(Color::Gray)
-                    .add_modifier(Modifier::ITALIC),
-            ))));
-            return;
-        }
-
-        // Render each hunk
-        for hunk in &diff.hunks {
-            // Hunk header with indentation
-            items.push(ListItem::new(Line::from(Span::styled(
-                format!("    {}", hunk.header.raw),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
-            ))));
-
-            // Diff lines with deeper indentation
-            for line in &hunk.lines {
-                let (prefix, color) = match line.line_type {
-                    LineType::Addition => ("+", Color::Green),
-                    LineType::Deletion => ("-", Color::Red),
-                    LineType::Context => (" ", Color::White),
-                    LineType::NoNewlineEOF => ("\\", Color::Yellow),
-                };
-
-                items.push(ListItem::new(Line::from(Span::styled(
-                    format!("      {}{}", prefix, line.content),
-                    Style::default().fg(color),
-                ))));
-            }
-
-            // Add spacing between hunks if there are multiple hunks
-            if diff.hunks.len() > 1 {
-                items.push(ListItem::new(Line::from("")));
-            }
-        }
-    }
 }

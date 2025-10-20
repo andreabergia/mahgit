@@ -368,15 +368,15 @@ impl App {
     }
 
     fn is_inline_diff_active(&self) -> bool {
-        if let Some(sel) = self.navigation.get_selected_file(&self.status) {
-            if let Some(state) = self.navigation.get_file_diff(&sel.path) {
-                return state.expanded
-                    && state
-                        .diff
-                        .as_ref()
-                        .map(|d| !d.hunks.is_empty())
-                        .unwrap_or(false);
-            }
+        if let Some(sel) = self.navigation.get_selected_file(&self.status)
+            && let Some(state) = self.navigation.get_file_diff(&sel.path)
+        {
+            return state.expanded
+                && state
+                    .diff
+                    .as_ref()
+                    .map(|d| !d.hunks.is_empty())
+                    .unwrap_or(false);
         }
         false
     }
@@ -406,71 +406,59 @@ impl App {
 
     fn inline_stage_current_hunk(&mut self) {
         use navigation::FileContext;
-        if let Some(sel) = self.navigation.get_selected_file(&self.status) {
-            if let Some(state) = self.navigation.get_file_diff(&sel.path) {
-                if let Some(diff) = &state.diff {
-                    let idx = state.current_hunk.min(diff.hunks.len().saturating_sub(1));
-                    if let Some(hunk) = diff.hunks.get(idx) {
-                        let stager = HunkStager::new(&self.repository);
-                        let res = match sel.context {
-                            FileContext::Unstaged | FileContext::Untracked => {
-                                stager.stage_hunk(&sel.path, hunk)
-                            }
-                            FileContext::Staged => stager.unstage_hunk(&sel.path, hunk),
-                            FileContext::Conflicted => {
-                                Err(crate::repository::RepositoryError::Other(
-                                    "Cannot modify conflicted files".into(),
-                                ))
-                            }
-                        };
-                        match res {
-                            Ok(r) => {
-                                // Preserve selection and move to next hunk after refresh
-                                let file_path = sel.path.clone();
-                                let prev_index = state.current_hunk;
-                                let prev_ctx = state.diff_context.clone();
+        if let Some(sel) = self.navigation.get_selected_file(&self.status)
+            && let Some(state) = self.navigation.get_file_diff(&sel.path)
+            && let Some(diff) = &state.diff
+        {
+            let idx = state.current_hunk.min(diff.hunks.len().saturating_sub(1));
+            if let Some(hunk) = diff.hunks.get(idx) {
+                let stager = HunkStager::new(&self.repository);
+                let res = match sel.context {
+                    FileContext::Unstaged | FileContext::Untracked => {
+                        stager.stage_hunk(&sel.path, hunk)
+                    }
+                    FileContext::Staged => stager.unstage_hunk(&sel.path, hunk),
+                    FileContext::Conflicted => Err(crate::repository::RepositoryError::Other(
+                        "Cannot modify conflicted files".into(),
+                    )),
+                };
+                match res {
+                    Ok(r) => {
+                        // Preserve selection and move to next hunk after refresh
+                        let file_path = sel.path.clone();
+                        let prev_index = state.current_hunk;
+                        let prev_ctx = state.diff_context.clone();
 
-                                self.feedback_manager.show_result(r);
-                                self.refresh_status_after_operation();
+                        self.feedback_manager.show_result(r);
+                        self.refresh_status_after_operation();
 
-                                // Regenerate and re-expand inline diff for the same file
-                                let diff_generator =
-                                    crate::diff::DiffGenerator::new(self.repository.git2_repo());
-                                if let Ok(new_diff) =
-                                    diff_generator.generate_diff(&file_path, prev_ctx.clone())
-                                {
-                                    self.navigation.set_file_diff(
-                                        file_path.clone(),
-                                        new_diff,
-                                        prev_ctx,
-                                    );
-                                    // Move selection to next hunk (same index after removal), clamp
-                                    if let Some(state2) = self.navigation.get_file_diff(&file_path)
-                                    {
-                                        let len = state2
-                                            .diff
-                                            .as_ref()
-                                            .map(|d| d.hunks.len())
-                                            .unwrap_or(0);
-                                        let next = if len == 0 {
-                                            0
-                                        } else {
-                                            prev_index.min(len.saturating_sub(1))
-                                        };
-                                        self.navigation
-                                            .set_current_inline_hunk_index(&file_path, next);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                self.feedback_manager.show_result(
-                                    crate::operations::OperationResult::new(format!(
-                                        "Hunk operation failed: {}",
-                                        e
-                                    )),
-                                );
+                        // Regenerate and re-expand inline diff for the same file
+                        let diff_generator =
+                            crate::diff::DiffGenerator::new(self.repository.git2_repo());
+                        if let Ok(new_diff) =
+                            diff_generator.generate_diff(&file_path, prev_ctx.clone())
+                        {
+                            self.navigation
+                                .set_file_diff(file_path.clone(), new_diff, prev_ctx);
+                            // Move selection to next hunk (same index after removal), clamp
+                            if let Some(state2) = self.navigation.get_file_diff(&file_path) {
+                                let len = state2.diff.as_ref().map(|d| d.hunks.len()).unwrap_or(0);
+                                let next = if len == 0 {
+                                    0
+                                } else {
+                                    prev_index.min(len.saturating_sub(1))
+                                };
+                                self.navigation
+                                    .set_current_inline_hunk_index(&file_path, next);
                             }
                         }
+                    }
+                    Err(e) => {
+                        self.feedback_manager
+                            .show_result(crate::operations::OperationResult::new(format!(
+                                "Hunk operation failed: {}",
+                                e
+                            )));
                     }
                 }
             }

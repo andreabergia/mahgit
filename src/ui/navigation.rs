@@ -321,26 +321,24 @@ impl NavigationState {
     }
 
     pub fn next_inline_hunk(&mut self, file_path: &str) {
-        if let Some(state) = self.file_diffs.get_mut(file_path) {
-            if let Some(diff) = &state.diff {
-                if !diff.hunks.is_empty() {
-                    state.current_hunk = (state.current_hunk + 1) % diff.hunks.len();
-                }
-            }
+        if let Some(state) = self.file_diffs.get_mut(file_path)
+            && let Some(diff) = &state.diff
+            && !diff.hunks.is_empty()
+        {
+            state.current_hunk = (state.current_hunk + 1) % diff.hunks.len();
         }
     }
 
     pub fn prev_inline_hunk(&mut self, file_path: &str) {
-        if let Some(state) = self.file_diffs.get_mut(file_path) {
-            if let Some(diff) = &state.diff {
-                if !diff.hunks.is_empty() {
-                    state.current_hunk = if state.current_hunk == 0 {
-                        diff.hunks.len() - 1
-                    } else {
-                        state.current_hunk - 1
-                    };
-                }
-            }
+        if let Some(state) = self.file_diffs.get_mut(file_path)
+            && let Some(diff) = &state.diff
+            && !diff.hunks.is_empty()
+        {
+            state.current_hunk = if state.current_hunk == 0 {
+                diff.hunks.len() - 1
+            } else {
+                state.current_hunk - 1
+            };
         }
     }
 

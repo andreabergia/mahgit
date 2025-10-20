@@ -474,26 +474,26 @@ mod tests {
             state: crossterm::event::KeyEventState::NONE,
         };
 
-        #[test]
-        fn test_shift_s_u_mapping() {
-            let mut handler = InputHandler::new();
-            let shift_s = KeyEvent {
-                code: KeyCode::Char('S'),
-                modifiers: KeyModifiers::SHIFT,
-                kind: crossterm::event::KeyEventKind::Press,
-                state: crossterm::event::KeyEventState::NONE,
-            };
-            let shift_u = KeyEvent {
-                code: KeyCode::Char('U'),
-                modifiers: KeyModifiers::SHIFT,
-                kind: crossterm::event::KeyEventKind::Press,
-                state: crossterm::event::KeyEventState::NONE,
-            };
-            assert_eq!(handler.handle_key(shift_s), Command::StageHunk);
-            assert_eq!(handler.handle_key(shift_u), Command::UnstageHunk);
-        }
-
         assert_eq!(handler.handle_key(space_key), Command::ToggleStage);
+    }
+
+    #[test]
+    fn test_shift_s_u_mapping() {
+        let mut handler = InputHandler::new();
+        let shift_s = KeyEvent {
+            code: KeyCode::Char('S'),
+            modifiers: KeyModifiers::SHIFT,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        let shift_u = KeyEvent {
+            code: KeyCode::Char('U'),
+            modifiers: KeyModifiers::SHIFT,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(shift_s), Command::StageHunk);
+        assert_eq!(handler.handle_key(shift_u), Command::UnstageHunk);
     }
 
     #[test]

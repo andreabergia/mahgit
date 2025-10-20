@@ -34,6 +34,7 @@ This is "mahgit", a Rust-based terminal Git interface that aims to replicate Mag
 
 ### Commit rules
 Do not give Claude attribution in the message. Try to keep message concise.
+Use conventional commits.
 
 ## Architecture and Technology Stack
 
