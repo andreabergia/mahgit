@@ -270,11 +270,27 @@ impl NavigationState {
 - This provides clearer UX than the original context-aware Tab proposal
 
 #### Phase 3: Enhanced Navigation
-- Add context-aware navigation (j/k behavior)
-- Implement inline hunk navigation (n/p keys)
-- Add inline hunk staging (s/u keys)
-- Refine Tab key context detection logic
-- Optimize scrolling behavior for mixed content
+The next batch of work should land in the order below because each step sets up state or UX expectations that the later ones rely on.
+
+1. **Split selection movement from viewport scrolling**
+   - Introduce dedicated commands for viewport scrolling (down/up via arrow keys and mouse wheel) that adjust a scroll offset without mutating `selected_index`.
+   - Keep `j/k` bound to the existing selection movement commands so list navigation and inline hunk traversal continue to work.
+   - Store the scroll offset alongside `NavigationState` (or an adjacent UI state struct) and feed it into `StatusView` instead of relying on `ListState`'s implicit scrolling.
+   - Update help text and documentation so users understand the arrow vs. vim-key distinction.
+
+2. **Add an explicit inline diff focus state**
+   - When Tab expands a file diff, leave focus on the file row; only enter “hunk focus” when the user issues a movement command that targets the diff (e.g., `j/k`, `n/p`, or left/right).
+   - Track this focus in navigation state (e.g., `NavigationFocus::File | NavigationFocus::Diff`) so other commands can tell whether a hunk is actually selected.
+   - Ensure collapsing a diff or switching files resets the focus back to the file to avoid stale hunk selections.
+
+3. **Unify staging shortcuts around `s`/`u`**
+   - Route lowercase `s/u` through a context-aware staging helper that stages/unstages hunks when diff focus is active, otherwise acts on the whole file.
+   - Remove the Shift+`S`/`U` bindings and the corresponding command variants once the new logic is in place.
+   - Refresh the help overlay and any inline documentation to reflect the simplified key set.
+
+4. **Fix redraw artifacts in wide terminals**
+   - Audit `StatusView` rendering and ensure every expanded/collapsed path writes full-width blank lines (or uses `Clear`) so no stale text remains.
+   - Exercise the UI with very wide terminals and nested expand/collapse cycles to confirm there are no lingering ghost lines.
 
 #### Phase 4: Polish and Optimization
 - Add visual indicators for expanded states
