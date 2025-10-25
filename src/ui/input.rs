@@ -40,10 +40,6 @@ pub enum Command {
     GoToTopOfDiff,
     GoToBottomOfDiff,
 
-    // Hunk operations
-    StageHunk,
-    UnstageHunk,
-
     // Help
     ShowHelp,
 
@@ -168,23 +164,6 @@ impl InputHandler {
                 self.clear_sequence_state();
                 Command::MoveToBottom
             }
-            KeyEvent {
-                code: KeyCode::Char('S'),
-                modifiers: KeyModifiers::SHIFT,
-                ..
-            } => {
-                self.clear_sequence_state();
-                Command::StageHunk
-            }
-            KeyEvent {
-                code: KeyCode::Char('U'),
-                modifiers: KeyModifiers::SHIFT,
-                ..
-            } => {
-                self.clear_sequence_state();
-                Command::UnstageHunk
-            }
-
             // Handle space key
             KeyEvent {
                 code: KeyCode::Char(' '),
@@ -219,8 +198,6 @@ impl InputHandler {
                     'b' => Command::PageDiffUp,
                     'n' => Command::JumpToNextHunk,
                     'p' => Command::JumpToPreviousHunk,
-                    'S' => Command::StageHunk,
-                    'U' => Command::UnstageHunk,
                     '?' => Command::ShowHelp,
                     _ => Command::Unknown,
                 };
@@ -294,14 +271,10 @@ impl InputHandler {
             "  p/←     Jump to previous hunk",
             "",
             "File Operations:",
-            "  s       Stage file",
-            "  u       Unstage file",
+            "  s       Stage file or current diff hunk",
+            "  u       Unstage file or current diff hunk",
             "  a       Add untracked file",
             "  Space   Toggle stage/unstage",
-            "",
-            "Hunk Operations (in diff view):",
-            "  S       Stage current hunk",
-            "  U       Unstage current hunk",
             "",
             "Application:",
             "  q       Quit application",
@@ -492,8 +465,8 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(shift_s), Command::StageHunk);
-        assert_eq!(handler.handle_key(shift_u), Command::UnstageHunk);
+        assert_eq!(handler.handle_key(shift_s), Command::Unknown);
+        assert_eq!(handler.handle_key(shift_u), Command::Unknown);
     }
 
     #[test]

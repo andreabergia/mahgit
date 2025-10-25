@@ -38,6 +38,11 @@ pub enum ViewType {
     Status, // Remove Diff variant - everything stays in Status view
 }
 
+enum StageAction {
+    Stage,
+    Unstage,
+}
+
 impl App {
     pub fn new(repository: Repository, status: RepositoryStatus) -> Self {
         let navigation = NavigationState::new(&status);
@@ -227,12 +232,6 @@ impl App {
             Command::GoToBottomOfDiff => {
                 // TODO: Implement inline diff navigation
             }
-            Command::StageHunk => {
-                self.inline_stage_current_hunk();
-            }
-            Command::UnstageHunk => {
-                self.inline_stage_current_hunk();
-            }
             Command::Unknown => {
                 // Ignore unknown commands
             }
@@ -285,10 +284,18 @@ impl App {
     }
 
     fn stage_selected_file(&mut self) {
+        if self.inline_hunk_applicable(StageAction::Stage) {
+            self.inline_stage_current_hunk();
+            return;
+        }
         self.execute_staging_operation(|ops, path| ops.stage_file(path), "stage");
     }
 
     fn unstage_selected_file(&mut self) {
+        if self.inline_hunk_applicable(StageAction::Unstage) {
+            self.inline_stage_current_hunk();
+            return;
+        }
         self.execute_staging_operation(|ops, path| ops.unstage_file(path), "unstage");
     }
 
@@ -463,6 +470,22 @@ impl App {
                 }
             }
         }
+    }
+
+    fn inline_hunk_applicable(&self, action: StageAction) -> bool {
+        if !self.is_inline_diff_active() {
+            return false;
+        }
+        if let Some(selected) = self.navigation.get_selected_file(&self.status) {
+            use navigation::FileContext;
+            return matches!(
+                (action, selected.context),
+                (StageAction::Stage, FileContext::Unstaged)
+                    | (StageAction::Stage, FileContext::Untracked)
+                    | (StageAction::Unstage, FileContext::Staged)
+            );
+        }
+        false
     }
 
     pub fn render(&mut self, f: &mut ratatui::Frame) {

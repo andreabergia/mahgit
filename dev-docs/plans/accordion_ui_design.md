@@ -283,10 +283,10 @@ The next batch of work should land in the order below because each step sets up 
    - Track this focus in navigation state (e.g., `NavigationFocus::File | NavigationFocus::Diff`) so other commands can tell whether a hunk is actually selected.
    - Ensure collapsing a diff or switching files resets the focus back to the file to avoid stale hunk selections.
 
-3. **Unify staging shortcuts around `s`/`u`**
-   - Route lowercase `s/u` through a context-aware staging helper that stages/unstages hunks when diff focus is active, otherwise acts on the whole file.
-   - Remove the Shift+`S`/`U` bindings and the corresponding command variants once the new logic is in place.
-   - Refresh the help overlay and any inline documentation to reflect the simplified key set.
+3. **Unify staging shortcuts around `s`/`u`** ✅
+   - ✅ Route lowercase `s/u` through a context-aware staging helper that stages/unstages hunks when an inline diff is active, otherwise acts on the whole file.
+   - ✅ Remove the Shift+`S`/`U` bindings and the corresponding command variants once the new logic is in place.
+   - ✅ Refresh the help overlay and any inline documentation to reflect the simplified key set.
 
 4. **Fix redraw artifacts in wide terminals**
    - Audit `StatusView` rendering and ensure every expanded/collapsed path writes full-width blank lines (or uses `Clear`) so no stale text remains.
