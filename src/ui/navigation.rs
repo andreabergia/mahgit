@@ -8,12 +8,24 @@ pub struct SelectedFile {
     pub context: FileContext,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FileContext {
     Staged,
     Unstaged,
     Untracked,
     Conflicted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileDiffKey {
+    pub path: String,
+    pub context: FileContext,
+}
+
+impl FileDiffKey {
+    pub fn new(path: String, context: FileContext) -> Self {
+        Self { path, context }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -35,10 +47,17 @@ pub struct SectionCollapsedState {
 #[derive(Clone, Debug)]
 pub struct InlineDiffState {
     pub file_path: String,
+    pub file_context: FileContext,
     pub diff_context: crate::diff::DiffContext,
     pub diff: Option<Diff>,
     pub expanded: bool,
     pub current_hunk: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavigationFocus {
+    File,
+    InlineDiff,
 }
 
 pub struct NavigationState {
@@ -46,7 +65,8 @@ pub struct NavigationState {
     selected_index: usize,
     sections: Vec<SectionInfo>,
     section_collapsed: SectionCollapsedState,
-    file_diffs: HashMap<String, InlineDiffState>,
+    file_diffs: HashMap<FileDiffKey, InlineDiffState>,
+    focus: NavigationFocus,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -55,6 +75,17 @@ pub enum StatusSection {
     Unstaged,
     Untracked,
     Conflicted,
+}
+
+impl From<StatusSection> for FileContext {
+    fn from(section: StatusSection) -> Self {
+        match section {
+            StatusSection::Staged => FileContext::Staged,
+            StatusSection::Unstaged => FileContext::Unstaged,
+            StatusSection::Untracked => FileContext::Untracked,
+            StatusSection::Conflicted => FileContext::Conflicted,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +109,7 @@ impl NavigationState {
             sections,
             section_collapsed: SectionCollapsedState::default(),
             file_diffs: HashMap::new(),
+            focus: NavigationFocus::File,
         }
     }
 
@@ -93,9 +125,11 @@ impl NavigationState {
         } else {
             self.reset_to_first_available();
         }
+        self.focus = NavigationFocus::File;
     }
 
     pub fn move_up(&mut self) {
+        self.focus = NavigationFocus::File;
         if self.selected_index > 0 {
             self.selected_index -= 1;
         } else if let Some(prev_section) = self.find_previous_non_empty_section() {
@@ -108,6 +142,7 @@ impl NavigationState {
     }
 
     pub fn move_down(&mut self) {
+        self.focus = NavigationFocus::File;
         if let Some(section_info) = self.get_current_section_info() {
             if self.selected_index + 1 < section_info.file_count {
                 self.selected_index += 1;
@@ -119,10 +154,12 @@ impl NavigationState {
     }
 
     pub fn move_to_top(&mut self) {
+        self.focus = NavigationFocus::File;
         self.reset_to_first_available();
     }
 
     pub fn move_to_bottom(&mut self) {
+        self.focus = NavigationFocus::File;
         if let Some(last_section) = self.sections.last()
             && last_section.file_count > 0
         {
@@ -237,52 +274,50 @@ impl NavigationState {
         }
     }
 
-    pub fn is_file_diff_expanded(&self, file_path: &str) -> bool {
+    pub fn is_file_diff_expanded(&self, key: &FileDiffKey) -> bool {
         self.file_diffs
-            .get(file_path)
+            .get(key)
             .map(|state| state.expanded)
             .unwrap_or(false)
     }
 
-    pub fn get_file_diff(&self, file_path: &str) -> Option<&InlineDiffState> {
-        self.file_diffs.get(file_path)
+    pub fn get_file_diff(&self, key: &FileDiffKey) -> Option<&InlineDiffState> {
+        self.file_diffs.get(key)
     }
 
     pub fn toggle_file_diff_expanded(
         &mut self,
-        file_path: String,
+        key: FileDiffKey,
         diff_context: crate::diff::DiffContext,
     ) {
-        match self.file_diffs.get_mut(&file_path) {
-            Some(diff_state) => {
-                diff_state.expanded = !diff_state.expanded;
-            }
-            None => {
-                // Create new diff state as expanded
-                self.file_diffs.insert(
-                    file_path.clone(),
-                    InlineDiffState {
-                        file_path,
-                        diff_context,
-                        diff: None,
-                        expanded: true,
-                        current_hunk: 0,
-                    },
-                );
-            }
+        if let Some(diff_state) = self.file_diffs.get_mut(&key) {
+            diff_state.expanded = !diff_state.expanded;
+        } else {
+            self.file_diffs.insert(
+                key.clone(),
+                InlineDiffState {
+                    file_path: key.path.clone(),
+                    file_context: key.context,
+                    diff_context,
+                    diff: None,
+                    expanded: true,
+                    current_hunk: 0,
+                },
+            );
         }
     }
 
     pub fn set_file_diff(
         &mut self,
-        file_path: String,
+        key: FileDiffKey,
         diff: Diff,
         diff_context: crate::diff::DiffContext,
     ) {
         self.file_diffs.insert(
-            file_path.clone(),
+            key.clone(),
             InlineDiffState {
-                file_path,
+                file_path: key.path.clone(),
+                file_context: key.context,
                 diff_context,
                 diff: Some(diff),
                 expanded: true,
@@ -310,40 +345,50 @@ impl NavigationState {
         false
     }
 
-    pub fn set_current_inline_hunk_index(&mut self, file_path: &str, idx: usize) {
-        if let Some(state) = self.file_diffs.get_mut(file_path) {
+    pub fn set_current_inline_hunk_index(&mut self, key: &FileDiffKey, idx: usize) {
+        if let Some(state) = self.file_diffs.get_mut(key) {
             state.current_hunk = idx;
         }
     }
 
-    pub fn get_current_inline_hunk_index(&self, file_path: &str) -> Option<usize> {
-        self.file_diffs.get(file_path).map(|s| s.current_hunk)
+    pub fn get_current_inline_hunk_index(&self, key: &FileDiffKey) -> Option<usize> {
+        self.file_diffs.get(key).map(|s| s.current_hunk)
     }
 
-    pub fn next_inline_hunk(&mut self, file_path: &str) {
-        if let Some(state) = self.file_diffs.get_mut(file_path)
+    pub fn next_inline_hunk(&mut self, key: &FileDiffKey) {
+        if let Some(state) = self.file_diffs.get_mut(key)
             && let Some(diff) = &state.diff
             && !diff.hunks.is_empty()
+            && state.current_hunk + 1 < diff.hunks.len()
         {
-            state.current_hunk = (state.current_hunk + 1) % diff.hunks.len();
+            state.current_hunk += 1;
         }
     }
 
-    pub fn prev_inline_hunk(&mut self, file_path: &str) {
-        if let Some(state) = self.file_diffs.get_mut(file_path)
+    pub fn prev_inline_hunk(&mut self, key: &FileDiffKey) {
+        if let Some(state) = self.file_diffs.get_mut(key)
             && let Some(diff) = &state.diff
             && !diff.hunks.is_empty()
+            && state.current_hunk > 0
         {
-            state.current_hunk = if state.current_hunk == 0 {
-                diff.hunks.len() - 1
-            } else {
-                state.current_hunk - 1
-            };
+            state.current_hunk -= 1;
         }
     }
 
-    pub fn remove_file_diff(&mut self, file_path: &str) {
-        self.file_diffs.remove(file_path);
+    pub fn remove_file_diff(&mut self, key: &FileDiffKey) {
+        self.file_diffs.remove(key);
+    }
+
+    pub fn focus(&self) -> NavigationFocus {
+        self.focus
+    }
+
+    pub fn set_focus(&mut self, focus: NavigationFocus) {
+        self.focus = focus;
+    }
+
+    pub fn reset_focus(&mut self) {
+        self.focus = NavigationFocus::File;
     }
 
     fn build_sections(status: &RepositoryStatus) -> Vec<SectionInfo> {

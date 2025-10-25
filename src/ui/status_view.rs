@@ -1,6 +1,6 @@
 use crate::diff::{Diff, LineType};
 use crate::status::{FileEntry, RepositoryStatus};
-use crate::ui::navigation::{NavigationState, StatusSection};
+use crate::ui::navigation::{FileDiffKey, NavigationFocus, NavigationState, StatusSection};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Margin, Rect},
@@ -166,7 +166,8 @@ impl<'a> StatusView<'a> {
                 *current_file_index += 1;
 
                 // Add inline diff content if file diff is expanded
-                if let Some(diff_state) = self.navigation.get_file_diff(&entry.path)
+                let diff_key = FileDiffKey::new(entry.path.clone(), section.into());
+                if let Some(diff_state) = self.navigation.get_file_diff(&diff_key)
                     && diff_state.expanded
                 {
                     if let Some(diff) = &diff_state.diff {
@@ -255,7 +256,8 @@ impl<'a> StatusView<'a> {
                 *current_file_index += 1;
 
                 // Add inline diff content if file diff is expanded
-                if let Some(diff_state) = self.navigation.get_file_diff(file)
+                let diff_key = FileDiffKey::new(file.clone(), section.into());
+                if let Some(diff_state) = self.navigation.get_file_diff(&diff_key)
                     && diff_state.expanded
                 {
                     if let Some(diff) = &diff_state.diff {
@@ -304,6 +306,7 @@ impl<'a> StatusView<'a> {
         diff: &Diff,
         selected_hunk: usize,
     ) {
+        let diff_focused = self.navigation.focus() == NavigationFocus::InlineDiff;
         // Check for binary files
         if diff.binary {
             items.push(ListItem::new(Line::from(Span::styled(
@@ -317,7 +320,7 @@ impl<'a> StatusView<'a> {
 
         for (idx, hunk) in diff.hunks.iter().enumerate() {
             // Hunk header with indentation and selection highlight
-            let header_style = if idx == selected_hunk {
+            let header_style = if diff_focused && idx == selected_hunk {
                 Style::default().fg(Color::Cyan).bg(Color::DarkGray)
             } else {
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM)
