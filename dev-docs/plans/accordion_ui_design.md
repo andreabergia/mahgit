@@ -314,10 +314,10 @@ The next batch of work should land in the order below because each step sets up 
    - ✅ Stored viewport metrics plus the manual scroll flag in `NavigationState` and routed them through `StatusView` to avoid reliance on `ListState`’s implicit scrolling.
    - ⏳ Update help text and documentation so users understand the arrow, vim, n/p, and space distinctions.
 
-2. **Add an explicit inline diff focus state**
-   - When Tab expands a file diff, leave focus on the file row; only enter “hunk focus” when the user issues a movement command that targets the diff (e.g., `j/k` traversal).
-   - Track this focus in navigation state (e.g., `NavigationFocus::File | NavigationFocus::Diff`) so other commands can tell whether a hunk is actually selected.
-   - Ensure collapsing a diff or switching files resets the focus back to the file to avoid stale hunk selections.
+2. **Add an explicit inline diff focus state** ✅
+   - ✅ When Tab expands a file diff, leave focus on the file row; only enter “hunk focus” when the user issues a movement command that targets the diff (e.g., `j/k` traversal).
+   - ✅ Track this focus in navigation state (e.g., `NavigationFocus::File | NavigationFocus::Diff`) so other commands can tell whether a hunk is actually selected.
+   - ✅ Ensure collapsing a diff or switching files resets the focus back to the file to avoid stale hunk selections.
 
 3. **Unify staging shortcuts around `s`/`u`** ✅
    - ✅ Route lowercase `s/u` through a context-aware staging helper that stages/unstages hunks when an inline diff is active, otherwise acts on the whole file.

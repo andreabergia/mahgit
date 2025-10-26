@@ -370,6 +370,13 @@ impl NavigationState {
         }
     }
 
+    pub fn reset_inline_diff_selection(&mut self, key: &FileDiffKey) {
+        if let Some(state) = self.file_diffs.get_mut(key) {
+            state.current_hunk = 0;
+            self.clear_manual_scroll();
+        }
+    }
+
     pub fn get_current_inline_hunk_index(&self, key: &FileDiffKey) -> Option<usize> {
         self.file_diffs.get(key).map(|s| s.current_hunk)
     }

@@ -339,7 +339,8 @@ impl App {
             if self.navigation.is_file_diff_expanded(&diff_key) {
                 // Collapse the diff
                 self.navigation
-                    .toggle_file_diff_expanded(diff_key, diff_context);
+                    .toggle_file_diff_expanded(diff_key.clone(), diff_context);
+                self.navigation.reset_inline_diff_selection(&diff_key);
                 self.navigation.reset_focus();
             } else {
                 // Generate the diff first before marking as expanded
@@ -349,7 +350,9 @@ impl App {
                         // Only expand if diff generation succeeds
                         self.navigation
                             .toggle_file_diff_expanded(diff_key.clone(), diff_context.clone());
-                        self.navigation.set_file_diff(diff_key, diff, diff_context);
+                        self.navigation
+                            .set_file_diff(diff_key.clone(), diff, diff_context);
+                        self.navigation.reset_inline_diff_selection(&diff_key);
                         self.navigation.reset_focus();
                     }
                     Err(err) => {
@@ -373,6 +376,7 @@ impl App {
                     match direction {
                         VerticalDirection::Up => {
                             if current == 0 {
+                                self.navigation.reset_inline_diff_selection(&diff_key);
                                 self.navigation.reset_focus();
                                 self.move_file_selection(direction);
                             } else {
@@ -381,6 +385,7 @@ impl App {
                         }
                         VerticalDirection::Down => {
                             if current + 1 >= total {
+                                self.navigation.reset_inline_diff_selection(&diff_key);
                                 self.navigation.reset_focus();
                                 self.move_file_selection(direction);
                             } else {
@@ -451,6 +456,7 @@ impl App {
                             self.navigation.next_inline_hunk(&diff_key);
                             return;
                         }
+                        self.navigation.reset_inline_diff_selection(&diff_key);
                         self.navigation.reset_focus();
                         self.navigation.move_down();
                         return;
@@ -472,6 +478,7 @@ impl App {
                             self.navigation.prev_inline_hunk(&diff_key);
                             return;
                         }
+                        self.navigation.reset_inline_diff_selection(&diff_key);
                         self.navigation.reset_focus();
                         return;
                     }
