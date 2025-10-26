@@ -9,6 +9,40 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
+struct ListRenderContext<'a> {
+    selected_list_index: &'a mut Option<usize>,
+    scroll_targets: &'a mut Vec<usize>,
+    track_visibility: bool,
+}
+
+impl<'a> ListRenderContext<'a> {
+    fn new(
+        selected_list_index: &'a mut Option<usize>,
+        scroll_targets: &'a mut Vec<usize>,
+        track_visibility: bool,
+    ) -> Self {
+        Self {
+            selected_list_index,
+            scroll_targets,
+            track_visibility,
+        }
+    }
+
+    fn select_index(&mut self, index: usize) {
+        *self.selected_list_index = Some(index);
+    }
+
+    fn ensure_visible(&mut self, index: usize) {
+        if self.track_visibility {
+            self.scroll_targets.push(index);
+        }
+    }
+
+    fn should_track_visibility(&self) -> bool {
+        self.track_visibility
+    }
+}
+
 pub struct StatusView<'a> {
     status: &'a RepositoryStatus,
     navigation: &'a NavigationState,
@@ -61,11 +95,16 @@ impl<'a> StatusView<'a> {
         let mut items = Vec::new();
         let mut selected_list_index = None;
         let mut scroll_targets: Vec<usize> = Vec::new();
+        let track_visibility = !self.navigation.is_manual_scroll_active();
+        let mut render_ctx = ListRenderContext::new(
+            &mut selected_list_index,
+            &mut scroll_targets,
+            track_visibility,
+        );
 
         self.add_section_items(
             &mut items,
-            &mut selected_list_index,
-            &mut scroll_targets,
+            &mut render_ctx,
             StatusSection::Conflicted,
             "Conflicted files",
             self.status.conflicted_files(),
@@ -73,8 +112,7 @@ impl<'a> StatusView<'a> {
 
         self.add_section_items_with_entries(
             &mut items,
-            &mut selected_list_index,
-            &mut scroll_targets,
+            &mut render_ctx,
             StatusSection::Unstaged,
             "Unstaged changes",
             self.status.unstaged_files(),
@@ -82,8 +120,7 @@ impl<'a> StatusView<'a> {
 
         self.add_section_items(
             &mut items,
-            &mut selected_list_index,
-            &mut scroll_targets,
+            &mut render_ctx,
             StatusSection::Untracked,
             "Untracked files",
             self.status.untracked_files(),
@@ -91,8 +128,7 @@ impl<'a> StatusView<'a> {
 
         self.add_section_items_with_entries(
             &mut items,
-            &mut selected_list_index,
-            &mut scroll_targets,
+            &mut render_ctx,
             StatusSection::Staged,
             "Staged changes",
             self.status.staged_files(),
@@ -114,8 +150,7 @@ impl<'a> StatusView<'a> {
     fn add_section_items_with_entries(
         &self,
         items: &mut Vec<ListItem>,
-        selected_list_index: &mut Option<usize>,
-        scroll_targets: &mut Vec<usize>,
+        render_ctx: &mut ListRenderContext,
         section: StatusSection,
         header: &str,
         entries: &[FileEntry],
@@ -137,8 +172,11 @@ impl<'a> StatusView<'a> {
             header_style,
         ))));
 
-        if self.navigation.current_section() == section && self.navigation.selected_index() == 0 {
-            scroll_targets.push(header_index);
+        if render_ctx.should_track_visibility()
+            && self.navigation.current_section() == section
+            && self.navigation.selected_index() == 0
+        {
+            render_ctx.ensure_visible(header_index);
         }
 
         // Only show files if section is not collapsed
@@ -153,9 +191,9 @@ impl<'a> StatusView<'a> {
                 if is_selected {
                     let index = items.len();
                     if self.navigation.focus() == NavigationFocus::File {
-                        *selected_list_index = Some(index);
+                        render_ctx.select_index(index);
                     }
-                    scroll_targets.push(index);
+                    render_ctx.ensure_visible(index);
                 }
 
                 let style = if is_selected {
@@ -187,8 +225,7 @@ impl<'a> StatusView<'a> {
                             items,
                             diff,
                             diff_state.current_hunk,
-                            selected_list_index,
-                            scroll_targets,
+                            render_ctx,
                         );
                     } else {
                         // Show loading placeholder
@@ -209,8 +246,7 @@ impl<'a> StatusView<'a> {
     fn add_section_items(
         &self,
         items: &mut Vec<ListItem>,
-        selected_list_index: &mut Option<usize>,
-        scroll_targets: &mut Vec<usize>,
+        render_ctx: &mut ListRenderContext,
         section: StatusSection,
         header: &str,
         files: &[String],
@@ -232,8 +268,11 @@ impl<'a> StatusView<'a> {
             header_style,
         ))));
 
-        if self.navigation.current_section() == section && self.navigation.selected_index() == 0 {
-            scroll_targets.push(header_index);
+        if render_ctx.should_track_visibility()
+            && self.navigation.current_section() == section
+            && self.navigation.selected_index() == 0
+        {
+            render_ctx.ensure_visible(header_index);
         }
 
         // Only show files if section is not collapsed
@@ -253,9 +292,9 @@ impl<'a> StatusView<'a> {
                 if is_selected {
                     let index = items.len();
                     if self.navigation.focus() == NavigationFocus::File {
-                        *selected_list_index = Some(index);
+                        render_ctx.select_index(index);
                     }
-                    scroll_targets.push(index);
+                    render_ctx.ensure_visible(index);
                 }
 
                 let style = if is_selected {
@@ -287,8 +326,7 @@ impl<'a> StatusView<'a> {
                             items,
                             diff,
                             diff_state.current_hunk,
-                            selected_list_index,
-                            scroll_targets,
+                            render_ctx,
                         );
                     } else {
                         // Show loading placeholder
@@ -329,8 +367,7 @@ impl<'a> StatusView<'a> {
         items: &mut Vec<ListItem>,
         diff: &Diff,
         selected_hunk: usize,
-        selected_list_index: &mut Option<usize>,
-        scroll_targets: &mut Vec<usize>,
+        render_ctx: &mut ListRenderContext,
     ) {
         let diff_focused = self.navigation.focus() == NavigationFocus::InlineDiff;
         // Check for binary files
@@ -354,8 +391,8 @@ impl<'a> StatusView<'a> {
             };
 
             if diff_focused && idx == selected_hunk {
-                scroll_targets.push(header_index);
-                *selected_list_index = Some(header_index);
+                render_ctx.ensure_visible(header_index);
+                render_ctx.select_index(header_index);
             }
 
             items.push(ListItem::new(Line::from(Span::styled(

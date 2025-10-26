@@ -71,6 +71,7 @@ pub struct NavigationState {
     scroll_offset: Cell<usize>,
     viewport_height: Cell<usize>,
     max_scroll_offset: Cell<usize>,
+    manual_scroll_active: Cell<bool>,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -117,6 +118,7 @@ impl NavigationState {
             scroll_offset: Cell::new(0),
             viewport_height: Cell::new(1),
             max_scroll_offset: Cell::new(0),
+            manual_scroll_active: Cell::new(false),
         }
     }
 
@@ -134,10 +136,12 @@ impl NavigationState {
         }
         self.focus = NavigationFocus::File;
         self.reset_scroll_position();
+        self.clear_manual_scroll();
     }
 
     pub fn move_up(&mut self) {
         self.focus = NavigationFocus::File;
+        self.clear_manual_scroll();
         if self.selected_index > 0 {
             self.selected_index -= 1;
         } else if let Some(prev_section) = self.find_previous_non_empty_section() {
@@ -151,6 +155,7 @@ impl NavigationState {
 
     pub fn move_down(&mut self) {
         self.focus = NavigationFocus::File;
+        self.clear_manual_scroll();
         if let Some(section_info) = self.get_current_section_info() {
             if self.selected_index + 1 < section_info.file_count {
                 self.selected_index += 1;
@@ -163,11 +168,13 @@ impl NavigationState {
 
     pub fn move_to_top(&mut self) {
         self.focus = NavigationFocus::File;
+        self.clear_manual_scroll();
         self.reset_to_first_available();
     }
 
     pub fn move_to_bottom(&mut self) {
         self.focus = NavigationFocus::File;
+        self.clear_manual_scroll();
         if let Some(last_section) = self.sections.last()
             && last_section.file_count > 0
         {
@@ -280,6 +287,7 @@ impl NavigationState {
             }
             StatusSection::Staged => self.section_collapsed.staged = !self.section_collapsed.staged,
         }
+        self.clear_manual_scroll();
     }
 
     pub fn is_file_diff_expanded(&self, key: &FileDiffKey) -> bool {
@@ -313,6 +321,7 @@ impl NavigationState {
                 },
             );
         }
+        self.clear_manual_scroll();
     }
 
     pub fn set_file_diff(
@@ -332,6 +341,7 @@ impl NavigationState {
                 current_hunk: 0,
             },
         );
+        self.clear_manual_scroll();
     }
 
     pub fn clear_diff_cache(&mut self) {
@@ -356,6 +366,7 @@ impl NavigationState {
     pub fn set_current_inline_hunk_index(&mut self, key: &FileDiffKey, idx: usize) {
         if let Some(state) = self.file_diffs.get_mut(key) {
             state.current_hunk = idx;
+            self.clear_manual_scroll();
         }
     }
 
@@ -370,6 +381,7 @@ impl NavigationState {
             && state.current_hunk + 1 < diff.hunks.len()
         {
             state.current_hunk += 1;
+            self.clear_manual_scroll();
         }
     }
 
@@ -380,11 +392,13 @@ impl NavigationState {
             && state.current_hunk > 0
         {
             state.current_hunk -= 1;
+            self.clear_manual_scroll();
         }
     }
 
     pub fn remove_file_diff(&mut self, key: &FileDiffKey) {
         self.file_diffs.remove(key);
+        self.clear_manual_scroll();
     }
 
     pub fn focus(&self) -> NavigationFocus {
@@ -403,6 +417,10 @@ impl NavigationState {
         self.scroll_offset.get()
     }
 
+    pub fn set_scroll_offset(&self, offset: usize) {
+        self.scroll_offset.set(offset);
+    }
+
     pub fn scroll_viewport_up(&self, lines: usize) {
         if lines == 0 {
             return;
@@ -410,6 +428,7 @@ impl NavigationState {
         let current = self.scroll_offset.get();
         let new_offset = current.saturating_sub(lines);
         self.scroll_offset.set(new_offset);
+        self.manual_scroll_active.set(true);
     }
 
     pub fn scroll_viewport_down(&self, lines: usize) {
@@ -420,6 +439,7 @@ impl NavigationState {
         let current = self.scroll_offset.get();
         let new_offset = current.saturating_add(lines).min(max_offset);
         self.scroll_offset.set(new_offset);
+        self.manual_scroll_active.set(true);
     }
 
     pub fn update_viewport_metrics(
@@ -432,7 +452,23 @@ impl NavigationState {
         self.viewport_height.set(clamped_height);
         let max_offset = total_items.saturating_sub(clamped_height);
         self.max_scroll_offset.set(max_offset);
-        self.ensure_targets_visible(visibility_targets);
+        let clamped_offset = self.scroll_offset.get().min(max_offset);
+        self.scroll_offset.set(clamped_offset);
+        if !self.manual_scroll_active.get() {
+            self.ensure_targets_visible(visibility_targets);
+        }
+    }
+
+    pub fn is_manual_scroll_active(&self) -> bool {
+        self.manual_scroll_active.get()
+    }
+
+    pub fn set_manual_scroll_active(&self, active: bool) {
+        self.manual_scroll_active.set(active);
+    }
+
+    pub fn clear_manual_scroll(&self) {
+        self.manual_scroll_active.set(false);
     }
 
     pub fn ensure_targets_visible(&self, visibility_targets: &[usize]) {
@@ -482,6 +518,7 @@ impl NavigationState {
 
     fn reset_scroll_position(&self) {
         self.scroll_offset.set(0);
+        self.clear_manual_scroll();
     }
 
     fn build_sections(status: &RepositoryStatus) -> Vec<SectionInfo> {
@@ -1033,5 +1070,28 @@ mod tests {
         nav.update_viewport_metrics(1, 50, &[]);
         nav.ensure_targets_visible(&[10]);
         assert_eq!(nav.scroll_offset(), 10);
+    }
+
+    #[test]
+    fn test_manual_scroll_flag_lifecycle() {
+        let status = create_test_status_with_files();
+        let mut nav = NavigationState::new(&status);
+
+        nav.update_viewport_metrics(3, 10, &[]);
+        assert!(!nav.is_manual_scroll_active());
+
+        nav.scroll_viewport_down(2);
+        assert_eq!(nav.scroll_offset(), 2);
+        assert!(nav.is_manual_scroll_active());
+
+        // Rendering should not snap the viewport back while manual scroll is active
+        nav.update_viewport_metrics(3, 10, &[0]);
+        assert_eq!(nav.scroll_offset(), 2);
+
+        nav.move_down();
+        assert!(!nav.is_manual_scroll_active());
+
+        nav.update_viewport_metrics(3, 10, &[nav.get_global_index()]);
+        assert_eq!(nav.scroll_offset(), 0);
     }
 }

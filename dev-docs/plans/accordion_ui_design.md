@@ -272,11 +272,11 @@ impl NavigationState {
 #### Phase 3: Enhanced Navigation
 The next batch of work should land in the order below because each step sets up state or UX expectations that the later ones rely on.
 
-1. **Split selection movement from viewport scrolling**
-   - Introduce dedicated commands for viewport scrolling (down/up via arrow keys and mouse wheel) that adjust a scroll offset without mutating `selected_index`.
-   - Keep `j/k` bound to the existing selection movement commands so list navigation and inline hunk traversal continue to work.
-   - Store the scroll offset alongside `NavigationState` (or an adjacent UI state struct) and feed it into `StatusView` instead of relying on `ListState`'s implicit scrolling.
-   - Update help text and documentation so users understand the arrow vs. vim-key distinction.
+1. **Split selection movement from viewport scrolling** ✅
+   - ✅ Introduced dedicated arrow key and mouse wheel commands that adjust a persistent scroll offset without mutating `selected_index`.
+   - ✅ Kept `j/k` bound to selection movement so vim-style navigation and inline hunk traversal continue to work.
+   - ✅ Stored viewport metrics plus the manual scroll flag in `NavigationState` and routed them through `StatusView` to avoid reliance on `ListState`’s implicit scrolling.
+   - ⏳ Update help text and documentation so users understand the arrow vs. vim-key distinction.
 
 2. **Add an explicit inline diff focus state**
    - When Tab expands a file diff, leave focus on the file row; only enter “hunk focus” when the user issues a movement command that targets the diff (e.g., `j/k`, `n/p`, or left/right).

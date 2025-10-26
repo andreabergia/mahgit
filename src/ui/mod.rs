@@ -482,6 +482,12 @@ impl App {
             if let Some(state) = self.navigation.get_file_diff(&diff_key)
                 && let Some(diff) = &state.diff
             {
+                let manual_scroll_state = if self.navigation.is_manual_scroll_active() {
+                    Some(self.navigation.scroll_offset())
+                } else {
+                    None
+                };
+
                 let idx = state.current_hunk.min(diff.hunks.len().saturating_sub(1));
                 if let Some(hunk) = diff.hunks.get(idx) {
                     let stager = HunkStager::new(&self.repository);
@@ -529,6 +535,10 @@ impl App {
                                         .set_current_inline_hunk_index(&diff_key_clone, next);
                                 }
                                 self.navigation.set_focus(NavigationFocus::InlineDiff);
+                                if let Some(offset) = manual_scroll_state {
+                                    self.navigation.set_scroll_offset(offset);
+                                    self.navigation.set_manual_scroll_active(true);
+                                }
                             }
                         }
                         Err(e) => {
