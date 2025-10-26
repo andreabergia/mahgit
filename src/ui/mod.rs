@@ -18,7 +18,7 @@ use crossterm::{
 };
 use feedback::FeedbackManager;
 use input::{Command, InputHandler};
-use navigation::{FileDiffKey, NavigationFocus, NavigationState, OperationContext, SelectedFile};
+use navigation::{FileDiffKey, NavigationFocus, NavigationState, SelectedFile};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use status_view::StatusView;
 use std::io::{Stdout, stdout};
@@ -157,8 +157,14 @@ impl App {
 
     fn handle_command(&mut self, command: Command) {
         match command {
-            Command::MoveUp => self.handle_vertical_navigation(VerticalDirection::Up),
-            Command::MoveDown => self.handle_vertical_navigation(VerticalDirection::Down),
+            Command::MoveUp => {
+                self.navigation.reset_focus();
+                self.navigation.move_up();
+            }
+            Command::MoveDown => {
+                self.navigation.reset_focus();
+                self.navigation.move_down();
+            }
             Command::ScrollViewportUp => {
                 self.navigation.scroll_viewport_up(1);
             }
@@ -191,9 +197,6 @@ impl App {
             Command::AddUntracked => {
                 self.add_selected_file();
             }
-            Command::ToggleStage => {
-                self.toggle_stage_selected_file();
-            }
             Command::EnterDiffView => {
                 self.toggle_inline_diff();
             }
@@ -206,16 +209,27 @@ impl App {
             Command::ToggleAccordion => {
                 self.toggle_accordion();
             }
-            Command::ScrollDiffUp
-            | Command::PageDiffUp
-            | Command::JumpToPreviousHunk
-            | Command::PreviousHunk => {
+            Command::ScrollDiffUp => {
+                self.handle_vertical_navigation(VerticalDirection::Up);
+            }
+            Command::ScrollDiffDown => {
+                self.handle_vertical_navigation(VerticalDirection::Down);
+            }
+            Command::PageDiffUp | Command::PreviousHunk => {
                 self.focus_inline_diff_and_move(InlineHunkDirection::Previous)
             }
-            Command::ScrollDiffDown
-            | Command::PageDiffDown
-            | Command::JumpToNextHunk
-            | Command::NextHunk => self.focus_inline_diff_and_move(InlineHunkDirection::Next),
+            Command::PageDiffDown | Command::NextHunk => {
+                self.focus_inline_diff_and_move(InlineHunkDirection::Next)
+            }
+            Command::JumpToPreviousHunk => {
+                self.jump_to_change(VerticalDirection::Up);
+            }
+            Command::JumpToNextHunk => {
+                self.jump_to_change(VerticalDirection::Down);
+            }
+            Command::PageForward => {
+                self.page_forward();
+            }
             Command::GoToTopOfDiff => {
                 // TODO: Implement inline diff navigation
             }
@@ -291,21 +305,6 @@ impl App {
 
     fn add_selected_file(&mut self) {
         self.execute_staging_operation(|ops, path| ops.add_untracked_file(path), "add");
-    }
-
-    fn toggle_stage_selected_file(&mut self) {
-        let operation_context = self.navigation.get_operation_context();
-        match operation_context {
-            OperationContext::CanStage => self.stage_selected_file(),
-            OperationContext::CanUnstage => self.unstage_selected_file(),
-            OperationContext::CanAdd => self.add_selected_file(),
-            OperationContext::ReadOnly => {
-                self.feedback_manager
-                    .show_result(crate::operations::OperationResult::new(
-                        "Cannot modify conflicted files".to_string(),
-                    ));
-            }
-        }
     }
 
     fn refresh_status_after_operation(&mut self) {
@@ -441,6 +440,77 @@ impl App {
                 }
             }
         }
+    }
+
+    fn jump_to_change(&mut self, direction: VerticalDirection) {
+        if let Some((diff_key, current, total)) = self.current_inline_diff_info() {
+            match direction {
+                VerticalDirection::Down => {
+                    if self.navigation.focus() == NavigationFocus::InlineDiff {
+                        if current + 1 < total {
+                            self.navigation.next_inline_hunk(&diff_key);
+                            return;
+                        }
+                        self.navigation.reset_focus();
+                        self.navigation.move_down();
+                        return;
+                    }
+
+                    if total > 0 {
+                        self.navigation.set_focus(NavigationFocus::InlineDiff);
+                        self.navigation.set_current_inline_hunk_index(&diff_key, 0);
+                        return;
+                    }
+
+                    self.navigation.reset_focus();
+                    self.navigation.move_down();
+                    return;
+                }
+                VerticalDirection::Up => {
+                    if self.navigation.focus() == NavigationFocus::InlineDiff {
+                        if current > 0 {
+                            self.navigation.prev_inline_hunk(&diff_key);
+                            return;
+                        }
+                        self.navigation.reset_focus();
+                        return;
+                    }
+
+                    self.navigation.reset_focus();
+                    self.navigation.move_up();
+                    if let Some((prev_key, _, prev_total)) = self
+                        .current_inline_diff_info()
+                        .filter(|(_, _, count)| *count > 0)
+                    {
+                        let last_hunk = prev_total.saturating_sub(1);
+                        self.navigation.set_focus(NavigationFocus::InlineDiff);
+                        self.navigation
+                            .set_current_inline_hunk_index(&prev_key, last_hunk);
+                    }
+                    return;
+                }
+            }
+        }
+
+        match direction {
+            VerticalDirection::Down => {
+                self.navigation.reset_focus();
+                self.navigation.move_down();
+            }
+            VerticalDirection::Up => {
+                self.navigation.reset_focus();
+                self.navigation.move_up();
+            }
+        }
+    }
+
+    fn page_forward(&mut self) {
+        let height = self.navigation.viewport_height();
+        if height == 0 {
+            return;
+        }
+        let step = height.saturating_sub(1).max(1);
+        self.navigation.scroll_viewport_down(step);
     }
 
     fn current_inline_diff_info(&self) -> Option<(FileDiffKey, usize, usize)> {

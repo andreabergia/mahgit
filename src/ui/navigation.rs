@@ -417,6 +417,10 @@ impl NavigationState {
         self.scroll_offset.get()
     }
 
+    pub fn viewport_height(&self) -> usize {
+        self.viewport_height.get()
+    }
+
     pub fn set_scroll_offset(&self, offset: usize) {
         self.scroll_offset.set(offset);
     }

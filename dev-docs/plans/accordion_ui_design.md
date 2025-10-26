@@ -60,6 +60,12 @@ pub struct NavigationState {
     section_collapsed: SectionCollapsedState,
     file_diffs: HashMap<String, InlineDiffState>,
     current_diff_scroll: usize,
+    focus: NavigationFocus,
+}
+
+pub enum NavigationFocus {
+    File,
+    Diff,
 }
 ```
 
@@ -74,8 +80,9 @@ pub enum Command {
     ToggleAccordion,        // Tab key - contextually toggle section or file diff
     ScrollInlineDiffUp,     // k when in expanded diff
     ScrollInlineDiffDown,   // j when in expanded diff
-    NextHunkInline,         // reserved; currently handled by j/k traversal
-    PrevHunkInline,         // reserved; currently handled by j/k traversal
+    NextHunkInline,         // n - jump to next hunk/file header from anywhere in the list
+    PrevHunkInline,         // p - jump to previous hunk/file header from anywhere in the list
+    PageForward,            // space - page scroll within the active focus (diff or list)
     StageHunkInline,        // s - stage current hunk in inline diff
     UnstageHunkInline,      // u - unstage current hunk in inline diff
 }
@@ -85,9 +92,9 @@ pub enum Command {
 - `Tab` → Contextually toggle section or file diff (context-aware)
   - When cursor is on section header: toggle section collapsed/expanded
   - When cursor is on file: toggle file diff inline display
-- `Arrow Up/Down` → Navigate files and sections
-- `j/k` → Scroll inline diff content without moving the selection
-- No dedicated hunk-jump binding; rely on `j/k` traversal for now
+- `Arrow Up/Down` / `j/k` → Scroll inline diff content without moving the selection; when no diff is focused they fall back to moving between visible rows.
+- `n/p` → Jump directly to the next/previous hunk header or file row regardless of current focus, skipping over inline diff body lines for fast traversal.
+- `Space` → Page-scroll the active focus: when a diff is focused, scroll its viewport by one screenful; otherwise page the status list while keeping the current selection in view.
 - `s/u` → Stage/unstage hunk when diff is expanded
 
 ### 3. Enhanced StatusView
@@ -163,13 +170,39 @@ impl StatusView {
 #### Context-Aware Navigation
 ```rust
 impl NavigationState {
-    pub fn move_down(&mut self) {
-        if self.is_diff_expanded_for_current_file() {
-            // Navigate within diff content
-            self.scroll_current_diff_down();
-        } else {
-            // Navigate to next file/section
-            self.move_to_next_file();
+    pub fn scroll_down(&mut self) {
+        // Both arrow keys and j feed into this path.
+        if self.focus == NavigationFocus::Diff && self.advance_inline_hunk(1) {
+            return;
+        }
+
+        self.focus = NavigationFocus::File;
+        self.move_to_next_row();
+        self.snap_viewport_to_selection();
+    }
+
+    pub fn scroll_up(&mut self) {
+        // Shared path for ↑/k as well.
+        if self.focus == NavigationFocus::Diff && self.advance_inline_hunk(-1) {
+            return;
+        }
+
+        self.focus = NavigationFocus::File;
+        self.move_to_previous_row();
+        self.snap_viewport_to_selection();
+    }
+
+    pub fn jump_to_next_change(&mut self) {
+        // Shared helper for `n` and the status-pane equivalents (next section, next file, next hunk header).
+        let target = self.index_of_next_marker(self.selected_index);
+        self.set_selection(target);
+        self.snap_viewport_to_selection();
+    }
+
+    pub fn page_forward(&mut self) {
+        match self.focus {
+            NavigationFocus::Diff => self.page_diff_down(),
+            NavigationFocus::File => self.page_status_list_down(),
         }
     }
     
@@ -274,10 +307,12 @@ impl NavigationState {
 The next batch of work should land in the order below because each step sets up state or UX expectations that the later ones rely on.
 
 1. **Split selection movement from viewport scrolling** ✅
-   - ✅ Introduced dedicated arrow key and mouse wheel commands that adjust the selection without mutating the manual scroll offset.
-   - ✅ Rebound `j/k` to control inline diff scrolling while leaving the file selection anchored.
+   - ✅ Routed both arrow keys and `j/k` through the same diff-first scroll path so inline content absorbs navigation before the list moves.
+   - ✅ Left the mouse wheel mapped to viewport-only scrolling to preserve manual scroll control.
+   - ✅ Wired `n/p` into the jump-to-change helpers so users can skip diff bodies quickly.
+   - ✅ Added a context-aware `PageForward` command behind `Space` so paging works in both the list and inline diff focus.
    - ✅ Stored viewport metrics plus the manual scroll flag in `NavigationState` and routed them through `StatusView` to avoid reliance on `ListState`’s implicit scrolling.
-   - ⏳ Update help text and documentation so users understand the arrow vs. vim-key distinction.
+   - ⏳ Update help text and documentation so users understand the arrow, vim, n/p, and space distinctions.
 
 2. **Add an explicit inline diff focus state**
    - When Tab expands a file diff, leave focus on the file row; only enter “hunk focus” when the user issues a movement command that targets the diff (e.g., `j/k` traversal).
@@ -289,8 +324,9 @@ The next batch of work should land in the order below because each step sets up 
    - ✅ Remove the Shift+`S`/`U` bindings and the corresponding command variants once the new logic is in place.
    - ✅ Refresh the help overlay and any inline documentation to reflect the simplified key set.
 
-#### Space Key Follow-Up: Staging Interactions
-- Keep `<space>` unbound for the moment and lean on `s/u` as the staging controls; document the absence of a space binding in the help overlay.
+#### Space Key Follow-Up: Paging Behavior
+- Bind `<space>` to the shared paging helper so expanded inline diffs scroll by one viewport while the status list paginates when no diff is focused.
+- Consider adding `Shift+<space>` as a future enhancement for reverse paging once the forward behavior ships and feels solid.
 
 4. **Fix redraw artifacts in wide terminals**
    - Audit `StatusView` rendering and ensure every expanded/collapsed path writes full-width blank lines (or uses `Clear`) so no stale text remains.
@@ -361,7 +397,7 @@ This design provides a comprehensive roadmap for implementing an accordion-style
 **What Works Now:**
 - Section collapse/expand with Tab key and visual indicators (▶/▼)
 - Enter key opens diff view for selected files
-- All existing diff operations preserved (arrow navigation, j/k traversal, S/U staging)
+- All existing diff operations preserved (arrow/vim navigation, S/U staging)
 - Clean separation between section management and diff viewing
 
 **Files Modified:**

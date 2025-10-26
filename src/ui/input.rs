@@ -18,7 +18,6 @@ pub enum Command {
     StageFile,
     UnstageFile,
     AddUntracked,
-    ToggleStage,
 
     // View commands
     EnterDiffView,
@@ -33,6 +32,7 @@ pub enum Command {
     ScrollDiffDown,
     PageDiffUp,
     PageDiffDown,
+    PageForward,
     JumpToNextHunk,
     JumpToPreviousHunk,
     NextHunk,
@@ -75,14 +75,14 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::ScrollViewportDown
+                Command::ScrollDiffDown
             }
 
             KeyEvent {
                 code: KeyCode::Up, ..
             } => {
                 self.clear_sequence_state();
-                Command::ScrollViewportUp
+                Command::ScrollDiffUp
             }
 
             KeyEvent {
@@ -173,7 +173,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::ToggleStage
+                Command::PageForward
             }
 
             // Handle all regular characters
@@ -189,8 +189,8 @@ impl InputHandler {
 
                 // If it's not a sequence, check for single-key commands
                 let command = match c {
-                    'j' => Command::MoveDown,
-                    'k' => Command::MoveUp,
+                    'j' => Command::ScrollDiffDown,
+                    'k' => Command::ScrollDiffUp,
                     'q' => Command::Quit,
                     'r' => Command::RefreshStatus,
                     's' => Command::StageFile,
@@ -259,10 +259,9 @@ impl InputHandler {
     pub fn get_help_text() -> Vec<&'static str> {
         vec![
             "Navigation:",
-            "  j       Move selection down",
-            "  k       Move selection up",
-            "  ↓/wheel Scroll viewport down",
-            "  ↑/wheel Scroll viewport up",
+            "  ↓/j     Scroll inline diff down (falls back to selection)",
+            "  ↑/k     Scroll inline diff up (falls back to selection)",
+            "  wheel   Scroll viewport",
             "  gg/Home Jump to top / Top of diff",
             "  G/End   Jump to bottom / Bottom of diff",
             "",
@@ -271,14 +270,14 @@ impl InputHandler {
             "  Enter   Open file in editor",
             "  f/PgDn  Page down in diff",
             "  b/PgUp  Page up in diff",
-            "  n/→     Jump to next hunk",
-            "  p/←     Jump to previous hunk",
+            "  n/→     Jump to next file or hunk header",
+            "  p/←     Jump to previous file or hunk header",
+            "  Space   Page forward (list or inline diff)",
             "",
             "File Operations:",
             "  s       Stage file or current diff hunk",
             "  u       Unstage file or current diff hunk",
             "  a       Add untracked file",
-            "  Space   Toggle stage/unstage",
             "",
             "Application:",
             "  q       Quit application",
@@ -311,7 +310,7 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(down_j), Command::MoveDown);
+        assert_eq!(handler.handle_key(down_j), Command::ScrollDiffDown);
 
         let up_k = KeyEvent {
             code: KeyCode::Char('k'),
@@ -319,7 +318,7 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(up_k), Command::MoveUp);
+        assert_eq!(handler.handle_key(up_k), Command::ScrollDiffUp);
     }
 
     #[test]
@@ -393,7 +392,7 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(j_key), Command::MoveDown);
+        assert_eq!(handler.handle_key(j_key), Command::ScrollDiffDown);
 
         // Test that unknown sequences return Unknown for both keys
         let x_key = KeyEvent {
@@ -450,8 +449,7 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-
-        assert_eq!(handler.handle_key(space_key), Command::ToggleStage);
+        assert_eq!(handler.handle_key(space_key), Command::PageForward);
     }
 
     #[test]
@@ -577,7 +575,7 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(down_arrow), Command::ScrollViewportDown);
+        assert_eq!(handler.handle_key(down_arrow), Command::ScrollDiffDown);
 
         let up_arrow = KeyEvent {
             code: KeyCode::Up,
@@ -585,7 +583,7 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(up_arrow), Command::ScrollViewportUp);
+        assert_eq!(handler.handle_key(up_arrow), Command::ScrollDiffUp);
     }
 
     #[test]

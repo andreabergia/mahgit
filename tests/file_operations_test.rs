@@ -135,7 +135,7 @@ fn test_stage_unstage_single_file() {
         "No files should be staged initially"
     );
 
-    test_app.toggle_stage_current_file().unwrap();
+    test_app.stage_current_file().unwrap();
 
     assert_eq!(
         get_staged_count(test_repo.path()),
