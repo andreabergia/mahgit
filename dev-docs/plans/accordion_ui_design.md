@@ -72,10 +72,10 @@ pub enum Command {
     
     // New accordion commands
     ToggleAccordion,        // Tab key - contextually toggle section or file diff
-    ScrollInlineDiffUp,     // j/k when in expanded diff
-    ScrollInlineDiffDown,
-    NextHunkInline,         // n - next hunk in inline diff
-    PrevHunkInline,         // p - previous hunk in inline diff
+    ScrollInlineDiffUp,     // k when in expanded diff
+    ScrollInlineDiffDown,   // j when in expanded diff
+    NextHunkInline,         // reserved; currently handled by j/k traversal
+    PrevHunkInline,         // reserved; currently handled by j/k traversal
     StageHunkInline,        // s - stage current hunk in inline diff
     UnstageHunkInline,      // u - unstage current hunk in inline diff
 }
@@ -85,8 +85,9 @@ pub enum Command {
 - `Tab` → Contextually toggle section or file diff (context-aware)
   - When cursor is on section header: toggle section collapsed/expanded
   - When cursor is on file: toggle file diff inline display
-- `j/k` → Navigate files or scroll diff content (context-aware)
-- `n/p` → Navigate hunks when diff is expanded
+- `Arrow Up/Down` → Navigate files and sections
+- `j/k` → Scroll inline diff content without moving the selection
+- No dedicated hunk-jump binding; rely on `j/k` traversal for now
 - `s/u` → Stage/unstage hunk when diff is expanded
 
 ### 3. Enhanced StatusView
@@ -273,13 +274,13 @@ impl NavigationState {
 The next batch of work should land in the order below because each step sets up state or UX expectations that the later ones rely on.
 
 1. **Split selection movement from viewport scrolling** ✅
-   - ✅ Introduced dedicated arrow key and mouse wheel commands that adjust a persistent scroll offset without mutating `selected_index`.
-   - ✅ Kept `j/k` bound to selection movement so vim-style navigation and inline hunk traversal continue to work.
+   - ✅ Introduced dedicated arrow key and mouse wheel commands that adjust the selection without mutating the manual scroll offset.
+   - ✅ Rebound `j/k` to control inline diff scrolling while leaving the file selection anchored.
    - ✅ Stored viewport metrics plus the manual scroll flag in `NavigationState` and routed them through `StatusView` to avoid reliance on `ListState`’s implicit scrolling.
    - ⏳ Update help text and documentation so users understand the arrow vs. vim-key distinction.
 
 2. **Add an explicit inline diff focus state**
-   - When Tab expands a file diff, leave focus on the file row; only enter “hunk focus” when the user issues a movement command that targets the diff (e.g., `j/k`, `n/p`, or left/right).
+   - When Tab expands a file diff, leave focus on the file row; only enter “hunk focus” when the user issues a movement command that targets the diff (e.g., `j/k` traversal).
    - Track this focus in navigation state (e.g., `NavigationFocus::File | NavigationFocus::Diff`) so other commands can tell whether a hunk is actually selected.
    - Ensure collapsing a diff or switching files resets the focus back to the file to avoid stale hunk selections.
 
@@ -287,6 +288,9 @@ The next batch of work should land in the order below because each step sets up 
    - ✅ Route lowercase `s/u` through a context-aware staging helper that stages/unstages hunks when an inline diff is active, otherwise acts on the whole file.
    - ✅ Remove the Shift+`S`/`U` bindings and the corresponding command variants once the new logic is in place.
    - ✅ Refresh the help overlay and any inline documentation to reflect the simplified key set.
+
+#### Space Key Follow-Up: Staging Interactions
+- Keep `<space>` unbound for the moment and lean on `s/u` as the staging controls; document the absence of a space binding in the help overlay.
 
 4. **Fix redraw artifacts in wide terminals**
    - Audit `StatusView` rendering and ensure every expanded/collapsed path writes full-width blank lines (or uses `Clear`) so no stale text remains.
@@ -357,7 +361,7 @@ This design provides a comprehensive roadmap for implementing an accordion-style
 **What Works Now:**
 - Section collapse/expand with Tab key and visual indicators (▶/▼)
 - Enter key opens diff view for selected files
-- All existing diff operations preserved (j/k navigation, n/p hunk nav, S/U staging)
+- All existing diff operations preserved (arrow navigation, j/k traversal, S/U staging)
 - Clean separation between section management and diff viewing
 
 **Files Modified:**
