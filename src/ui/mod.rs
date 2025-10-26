@@ -159,6 +159,12 @@ impl App {
         match command {
             Command::MoveUp => self.handle_vertical_navigation(VerticalDirection::Up),
             Command::MoveDown => self.handle_vertical_navigation(VerticalDirection::Down),
+            Command::ScrollViewportUp => {
+                self.navigation.scroll_viewport_up(1);
+            }
+            Command::ScrollViewportDown => {
+                self.navigation.scroll_viewport_down(1);
+            }
             Command::MoveToTop => {
                 self.navigation.reset_focus();
                 self.navigation.move_to_top();

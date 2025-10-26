@@ -1,5 +1,6 @@
 use crate::diff::Diff;
 use crate::status::RepositoryStatus;
+use std::cell::Cell;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -67,6 +68,9 @@ pub struct NavigationState {
     section_collapsed: SectionCollapsedState,
     file_diffs: HashMap<FileDiffKey, InlineDiffState>,
     focus: NavigationFocus,
+    scroll_offset: Cell<usize>,
+    viewport_height: Cell<usize>,
+    max_scroll_offset: Cell<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -110,6 +114,9 @@ impl NavigationState {
             section_collapsed: SectionCollapsedState::default(),
             file_diffs: HashMap::new(),
             focus: NavigationFocus::File,
+            scroll_offset: Cell::new(0),
+            viewport_height: Cell::new(1),
+            max_scroll_offset: Cell::new(0),
         }
     }
 
@@ -126,6 +133,7 @@ impl NavigationState {
             self.reset_to_first_available();
         }
         self.focus = NavigationFocus::File;
+        self.reset_scroll_position();
     }
 
     pub fn move_up(&mut self) {
@@ -389,6 +397,91 @@ impl NavigationState {
 
     pub fn reset_focus(&mut self) {
         self.focus = NavigationFocus::File;
+    }
+
+    pub fn scroll_offset(&self) -> usize {
+        self.scroll_offset.get()
+    }
+
+    pub fn scroll_viewport_up(&self, lines: usize) {
+        if lines == 0 {
+            return;
+        }
+        let current = self.scroll_offset.get();
+        let new_offset = current.saturating_sub(lines);
+        self.scroll_offset.set(new_offset);
+    }
+
+    pub fn scroll_viewport_down(&self, lines: usize) {
+        if lines == 0 {
+            return;
+        }
+        let max_offset = self.max_scroll_offset.get();
+        let current = self.scroll_offset.get();
+        let new_offset = current.saturating_add(lines).min(max_offset);
+        self.scroll_offset.set(new_offset);
+    }
+
+    pub fn update_viewport_metrics(
+        &self,
+        viewport_height: usize,
+        total_items: usize,
+        visibility_targets: &[usize],
+    ) {
+        let clamped_height = viewport_height.max(1);
+        self.viewport_height.set(clamped_height);
+        let max_offset = total_items.saturating_sub(clamped_height);
+        self.max_scroll_offset.set(max_offset);
+        self.ensure_targets_visible(visibility_targets);
+    }
+
+    pub fn ensure_targets_visible(&self, visibility_targets: &[usize]) {
+        let height = self.viewport_height.get().max(1);
+        let max_offset = self.max_scroll_offset.get();
+        let mut offset = self.scroll_offset.get().min(max_offset);
+
+        if visibility_targets.is_empty() {
+            if max_offset == 0 {
+                offset = 0;
+            }
+            if offset > max_offset {
+                offset = max_offset;
+            }
+            self.scroll_offset.set(offset);
+            return;
+        }
+
+        let base_margin = 1usize;
+        let margin = if height <= base_margin {
+            0
+        } else {
+            base_margin
+        };
+        let mut effective_offset = offset;
+        for &target in visibility_targets {
+            if target < effective_offset {
+                let desired = target.saturating_sub(margin);
+                effective_offset = desired.min(max_offset);
+            } else {
+                let visible_end = effective_offset.saturating_add(height.saturating_sub(1));
+                if target > visible_end {
+                    let desired = target.saturating_sub(margin);
+                    effective_offset = desired.min(max_offset);
+                }
+            }
+        }
+
+        let clamped_offset = if max_offset == 0 {
+            0
+        } else {
+            effective_offset.min(max_offset)
+        };
+
+        self.scroll_offset.set(clamped_offset);
+    }
+
+    fn reset_scroll_position(&self) {
+        self.scroll_offset.set(0);
     }
 
     fn build_sections(status: &RepositoryStatus) -> Vec<SectionInfo> {
@@ -899,5 +992,46 @@ mod tests {
         // Should maintain position in conflicted section since the file we were on still exists
         assert_eq!(nav.current_section(), StatusSection::Conflicted);
         assert_eq!(nav.selected_index(), 0);
+    }
+
+    #[test]
+    fn test_viewport_scroll_bounds() {
+        let status = create_test_status_with_files();
+        let nav = NavigationState::new(&status);
+
+        nav.update_viewport_metrics(3, 10, &[0]);
+        assert_eq!(nav.scroll_offset(), 0);
+
+        nav.scroll_viewport_down(2);
+        assert_eq!(nav.scroll_offset(), 2);
+
+        nav.scroll_viewport_down(10);
+        assert_eq!(nav.scroll_offset(), 7); // max offset = total (10) - height (3)
+
+        nav.scroll_viewport_up(1);
+        assert_eq!(nav.scroll_offset(), 6);
+
+        nav.scroll_viewport_up(10);
+        assert_eq!(nav.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn test_ensure_targets_visible_aligns_with_margin() {
+        let status = create_test_status_with_files();
+        let nav = NavigationState::new(&status);
+
+        nav.update_viewport_metrics(5, 100, &[]);
+        nav.ensure_targets_visible(&[50]);
+        assert_eq!(nav.scroll_offset(), 49);
+
+        nav.ensure_targets_visible(&[2]);
+        assert_eq!(nav.scroll_offset(), 1);
+
+        nav.ensure_targets_visible(&[99]);
+        assert_eq!(nav.scroll_offset(), 95);
+
+        nav.update_viewport_metrics(1, 50, &[]);
+        nav.ensure_targets_visible(&[10]);
+        assert_eq!(nav.scroll_offset(), 10);
     }
 }

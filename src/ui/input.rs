@@ -37,6 +37,8 @@ pub enum Command {
     JumpToPreviousHunk,
     NextHunk,
     PreviousHunk,
+    ScrollViewportDown,
+    ScrollViewportUp,
     GoToTopOfDiff,
     GoToBottomOfDiff,
 
@@ -73,14 +75,14 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::MoveDown
+                Command::ScrollViewportDown
             }
 
             KeyEvent {
                 code: KeyCode::Up, ..
             } => {
                 self.clear_sequence_state();
-                Command::MoveUp
+                Command::ScrollViewportUp
             }
 
             KeyEvent {
@@ -220,8 +222,8 @@ impl InputHandler {
 
     pub fn handle_mouse(&mut self, mouse_event: MouseEvent) -> Command {
         match mouse_event.kind {
-            MouseEventKind::ScrollUp => Command::MoveUp,
-            MouseEventKind::ScrollDown => Command::MoveDown,
+            MouseEventKind::ScrollUp => Command::ScrollViewportUp,
+            MouseEventKind::ScrollDown => Command::ScrollViewportDown,
             _ => Command::None,
         }
     }
@@ -257,8 +259,10 @@ impl InputHandler {
     pub fn get_help_text() -> Vec<&'static str> {
         vec![
             "Navigation:",
-            "  j/↓     Move down / Scroll diff down",
-            "  k/↑     Move up / Scroll diff up",
+            "  j       Move selection down",
+            "  k       Move selection up",
+            "  ↓/wheel Scroll viewport down",
+            "  ↑/wheel Scroll viewport up",
             "  gg/Home Jump to top / Top of diff",
             "  G/End   Jump to bottom / Bottom of diff",
             "",
@@ -543,7 +547,7 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         };
 
-        assert_eq!(handler.handle_mouse(scroll_up), Command::MoveUp);
+        assert_eq!(handler.handle_mouse(scroll_up), Command::ScrollViewportUp);
     }
 
     #[test]
@@ -557,7 +561,31 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         };
 
-        assert_eq!(handler.handle_mouse(scroll_down), Command::MoveDown);
+        assert_eq!(
+            handler.handle_mouse(scroll_down),
+            Command::ScrollViewportDown
+        );
+    }
+
+    #[test]
+    fn test_arrow_vertical_scroll_commands() {
+        let mut handler = InputHandler::new();
+
+        let down_arrow = KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(down_arrow), Command::ScrollViewportDown);
+
+        let up_arrow = KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(handler.handle_key(up_arrow), Command::ScrollViewportUp);
     }
 
     #[test]

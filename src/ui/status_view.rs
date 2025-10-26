@@ -59,13 +59,13 @@ impl<'a> StatusView<'a> {
 
     fn render_file_sections(&self, f: &mut Frame, area: Rect) {
         let mut items = Vec::new();
-        let mut current_file_index = 0;
         let mut selected_list_index = None;
+        let mut scroll_targets: Vec<usize> = Vec::new();
 
         self.add_section_items(
             &mut items,
-            &mut current_file_index,
             &mut selected_list_index,
+            &mut scroll_targets,
             StatusSection::Conflicted,
             "Conflicted files",
             self.status.conflicted_files(),
@@ -73,8 +73,8 @@ impl<'a> StatusView<'a> {
 
         self.add_section_items_with_entries(
             &mut items,
-            &mut current_file_index,
             &mut selected_list_index,
+            &mut scroll_targets,
             StatusSection::Unstaged,
             "Unstaged changes",
             self.status.unstaged_files(),
@@ -82,8 +82,8 @@ impl<'a> StatusView<'a> {
 
         self.add_section_items(
             &mut items,
-            &mut current_file_index,
             &mut selected_list_index,
+            &mut scroll_targets,
             StatusSection::Untracked,
             "Untracked files",
             self.status.untracked_files(),
@@ -91,18 +91,22 @@ impl<'a> StatusView<'a> {
 
         self.add_section_items_with_entries(
             &mut items,
-            &mut current_file_index,
             &mut selected_list_index,
+            &mut scroll_targets,
             StatusSection::Staged,
             "Staged changes",
             self.status.staged_files(),
         );
 
+        let viewport_height = area.height as usize;
+        self.navigation
+            .update_viewport_metrics(viewport_height, items.len(), &scroll_targets);
+
         let list = List::new(items);
 
-        // Create a list state that will handle scrolling automatically
         let mut list_state = ratatui::widgets::ListState::default();
         list_state.select(selected_list_index);
+        *list_state.offset_mut() = self.navigation.scroll_offset();
 
         f.render_stateful_widget(list, area, &mut list_state);
     }
@@ -110,8 +114,8 @@ impl<'a> StatusView<'a> {
     fn add_section_items_with_entries(
         &self,
         items: &mut Vec<ListItem>,
-        current_file_index: &mut usize,
         selected_list_index: &mut Option<usize>,
+        scroll_targets: &mut Vec<usize>,
         section: StatusSection,
         header: &str,
         entries: &[FileEntry],
@@ -127,10 +131,15 @@ impl<'a> StatusView<'a> {
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD);
 
+        let header_index = items.len();
         items.push(ListItem::new(Line::from(Span::styled(
             section_header,
             header_style,
         ))));
+
+        if self.navigation.current_section() == section && self.navigation.selected_index() == 0 {
+            scroll_targets.push(header_index);
+        }
 
         // Only show files if section is not collapsed
         if !is_collapsed {
@@ -142,7 +151,11 @@ impl<'a> StatusView<'a> {
 
                 // Track the list index of the selected item
                 if is_selected {
-                    *selected_list_index = Some(items.len());
+                    let index = items.len();
+                    if self.navigation.focus() == NavigationFocus::File {
+                        *selected_list_index = Some(index);
+                    }
+                    scroll_targets.push(index);
                 }
 
                 let style = if is_selected {
@@ -163,7 +176,6 @@ impl<'a> StatusView<'a> {
                 }
 
                 items.push(ListItem::new(Line::from(spans)));
-                *current_file_index += 1;
 
                 // Add inline diff content if file diff is expanded
                 let diff_key = FileDiffKey::new(entry.path.clone(), section.into());
@@ -175,6 +187,8 @@ impl<'a> StatusView<'a> {
                             items,
                             diff,
                             diff_state.current_hunk,
+                            selected_list_index,
+                            scroll_targets,
                         );
                     } else {
                         // Show loading placeholder
@@ -195,8 +209,8 @@ impl<'a> StatusView<'a> {
     fn add_section_items(
         &self,
         items: &mut Vec<ListItem>,
-        current_file_index: &mut usize,
         selected_list_index: &mut Option<usize>,
+        scroll_targets: &mut Vec<usize>,
         section: StatusSection,
         header: &str,
         files: &[String],
@@ -212,10 +226,15 @@ impl<'a> StatusView<'a> {
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD);
 
+        let header_index = items.len();
         items.push(ListItem::new(Line::from(Span::styled(
             section_header,
             header_style,
         ))));
+
+        if self.navigation.current_section() == section && self.navigation.selected_index() == 0 {
+            scroll_targets.push(header_index);
+        }
 
         // Only show files if section is not collapsed
         if !is_collapsed {
@@ -232,7 +251,11 @@ impl<'a> StatusView<'a> {
 
                 // Track the list index of the selected item
                 if is_selected {
-                    *selected_list_index = Some(items.len());
+                    let index = items.len();
+                    if self.navigation.focus() == NavigationFocus::File {
+                        *selected_list_index = Some(index);
+                    }
+                    scroll_targets.push(index);
                 }
 
                 let style = if is_selected {
@@ -253,7 +276,6 @@ impl<'a> StatusView<'a> {
                 }
 
                 items.push(ListItem::new(Line::from(spans)));
-                *current_file_index += 1;
 
                 // Add inline diff content if file diff is expanded
                 let diff_key = FileDiffKey::new(file.clone(), section.into());
@@ -265,6 +287,8 @@ impl<'a> StatusView<'a> {
                             items,
                             diff,
                             diff_state.current_hunk,
+                            selected_list_index,
+                            scroll_targets,
                         );
                     } else {
                         // Show loading placeholder
@@ -305,6 +329,8 @@ impl<'a> StatusView<'a> {
         items: &mut Vec<ListItem>,
         diff: &Diff,
         selected_hunk: usize,
+        selected_list_index: &mut Option<usize>,
+        scroll_targets: &mut Vec<usize>,
     ) {
         let diff_focused = self.navigation.focus() == NavigationFocus::InlineDiff;
         // Check for binary files
@@ -320,11 +346,18 @@ impl<'a> StatusView<'a> {
 
         for (idx, hunk) in diff.hunks.iter().enumerate() {
             // Hunk header with indentation and selection highlight
+            let header_index = items.len();
             let header_style = if diff_focused && idx == selected_hunk {
                 Style::default().fg(Color::Cyan).bg(Color::DarkGray)
             } else {
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM)
             };
+
+            if diff_focused && idx == selected_hunk {
+                scroll_targets.push(header_index);
+                *selected_list_index = Some(header_index);
+            }
+
             items.push(ListItem::new(Line::from(Span::styled(
                 format!("    {}", hunk.header.raw),
                 header_style,
