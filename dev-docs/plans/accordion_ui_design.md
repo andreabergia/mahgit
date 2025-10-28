@@ -331,9 +331,9 @@ The next batch of work should land in the order below because each step sets up 
 - Bind `<space>` to the shared paging helper so expanded inline diffs scroll by one viewport while the status list paginates when no diff is focused.
 - Consider adding `Shift+<space>` as a future enhancement for reverse paging once the forward behavior ships and feels solid.
 
-4. **Fix redraw artifacts in wide terminals**
-   - Audit `StatusView` rendering and ensure every expanded/collapsed path writes full-width blank lines (or uses `Clear`) so no stale text remains.
-   - Exercise the UI with very wide terminals and nested expand/collapse cycles to confirm there are no lingering ghost lines.
+4. **Fix redraw artifacts in wide terminals** ✅
+   - ✅ Audit `StatusView` rendering and ensure every expanded/collapsed path writes full-width blank lines (or uses `Clear`) so no stale text remains.
+   - ✅ Exercise the UI with very wide terminals and nested expand/collapse cycles to confirm there are no lingering ghost lines.
 
 #### Phase 4: Polish and Optimization
 - Add visual indicators for expanded states
