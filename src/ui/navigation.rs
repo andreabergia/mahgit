@@ -297,6 +297,16 @@ impl NavigationState {
             .unwrap_or(false)
     }
 
+    pub fn has_cached_diff_for(
+        &self,
+        key: &FileDiffKey,
+        context: &crate::diff::DiffContext,
+    ) -> bool {
+        self.file_diffs
+            .get(key)
+            .is_some_and(|state| state.diff.is_some() && state.diff_context == *context)
+    }
+
     pub fn get_file_diff(&self, key: &FileDiffKey) -> Option<&InlineDiffState> {
         self.file_diffs.get(key)
     }
@@ -646,6 +656,7 @@ impl NavigationState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diff::{Diff, DiffContext};
     use crate::status::{FileEntry, FileStatus};
 
     fn create_file_entry(path: &str, status: FileStatus) -> FileEntry {
@@ -1104,5 +1115,23 @@ mod tests {
 
         nav.update_viewport_metrics(3, 10, &[nav.get_global_index()]);
         assert_eq!(nav.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn test_has_cached_diff_for_respects_diff_context() {
+        let status = RepositoryStatus::empty();
+        let mut nav = NavigationState::new(&status);
+        let key = FileDiffKey::new("file.txt".to_string(), FileContext::Unstaged);
+        let diff = Diff {
+            file_path: "file.txt".to_string(),
+            context: DiffContext::WorkingTreeToIndex,
+            hunks: Vec::new(),
+            binary: false,
+        };
+
+        nav.set_file_diff(key.clone(), diff, DiffContext::WorkingTreeToIndex);
+
+        assert!(nav.has_cached_diff_for(&key, &DiffContext::WorkingTreeToIndex));
+        assert!(!nav.has_cached_diff_for(&key, &DiffContext::IndexToHead));
     }
 }

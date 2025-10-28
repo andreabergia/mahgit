@@ -296,7 +296,10 @@ impl NavigationState {
   - Modified `toggle_accordion()` to use context-aware logic: section toggle OR file diff toggle
   - Infrastructure in place for future enhancement of section header navigation
   - Currently defaults to file diff toggle behavior (preserves existing UX)
-- ⏳ Implement diff caching system (NEXT TASK)
+- ✅ Implement diff caching system
+  - Added `NavigationState::has_cached_diff_for()` to detect reusable inline diffs tied to their git context
+  - `App::toggle_inline_diff()` now reuses cached diffs when collapsing/re-expanding files instead of regenerating
+  - Manual refresh clears the cache to avoid stale data and a unit test covers the new helper
 
 **Note**: After Phase 1 implementation, the key binding strategy was refined:
 - Tab = Section collapse/expand (simple, predictable)

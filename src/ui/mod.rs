@@ -254,6 +254,7 @@ impl App {
                 )));
         } else {
             self.navigation.update_status(&self.status);
+            self.navigation.clear_diff_cache();
             self.feedback_manager
                 .show_result(crate::operations::OperationResult::new(
                     "Status refreshed".to_string(),
@@ -338,6 +339,14 @@ impl App {
             // Check if diff is already expanded
             if self.navigation.is_file_diff_expanded(&diff_key) {
                 // Collapse the diff
+                self.navigation
+                    .toggle_file_diff_expanded(diff_key.clone(), diff_context);
+                self.navigation.reset_inline_diff_selection(&diff_key);
+                self.navigation.reset_focus();
+            } else if self
+                .navigation
+                .has_cached_diff_for(&diff_key, &diff_context)
+            {
                 self.navigation
                     .toggle_file_diff_expanded(diff_key.clone(), diff_context);
                 self.navigation.reset_inline_diff_selection(&diff_key);
