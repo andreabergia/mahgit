@@ -337,82 +337,22 @@ The next batch of work should land in the order below because each step sets up 
 
 #### Phase 4: Polish and Optimization
 - Add visual indicators for expanded states
+  - Review current accordion widgets to confirm where expansion status is rendered.
+  - Select arrow/chevron glyphs that match the existing TUI style and palette.
+  - Update focus and toggle handlers so indicators stay in sync with state changes.
+  - Validate indicator accessibility (contrast, screen-reader labels if supported).
 - Implement smooth scrolling behavior
+  - Profile current scroll jumps with large panels to identify jitter.
+  - Introduce incremental scrolling logic that keeps redraw cost bounded.
+  - Ensure keyboard repeat events and mouse wheel inputs reuse the same path.
+  - Test with long diff previews in `.tmp/` repositories to check responsiveness.
 - Add keyboard shortcuts help updates (emphasize Tab key context behavior)
+  - Inventory current shortcut listings in the help modal/popup.
+  - Add context-specific description for the `Tab` key and related navigation keys.
+  - Sync documentation and on-screen hints so both reflect the new behavior.
+  - Verify help overlay rendering in narrow and wide layouts.
 - Performance tuning for large diffs
-
-## Benefits
-
-### User Experience
-- **Contextual Awareness**: Always see the file list and current selection
-- **Quick Comparison**: Toggle multiple file diffs without losing context
-- **Efficient Navigation**: Reduced cognitive load from view switching
-- **Magit-like Workflow**: Mirrors the accordion behavior of Magit
-
-### Technical Benefits
-- **Simplified State Management**: Single view mode reduces complexity
-- **Better Responsiveness**: No full-screen transitions
-- **Incremental Loading**: Generate diffs only when needed
-- **Memory Efficiency**: Cache management for better performance
-
-## Implementation Files
-
-### Primary Changes
-- `src/ui/mod.rs` - Remove Diff view mode, add accordion state
-- `src/ui/status_view.rs` - Major rewrite for inline diff rendering
-- `src/ui/navigation.rs` - Add section/diff state management
-- `src/ui/input.rs` - Add new command mappings
-
-### New Files
-- `src/ui/accordion.rs` - Accordion-specific rendering logic
-- `src/ui/inline_diff.rs` - Inline diff rendering utilities
-
-### Configuration
-- Add user preferences for default section collapsed states
-- Add keybinding customization support
-- Add diff display options (context lines, syntax highlighting)
-
-## Testing Strategy
-
-### Unit Tests
-- Section collapse/expand logic
-- Inline diff generation and caching
-- Navigation state transitions
-- Key mapping correctness
-
-### Integration Tests  
-- Full workflow testing (navigate, expand, diff, stage)
-- Performance testing with large repositories
-- Memory usage validation
-- Cross-platform keyboard handling
-
-### User Testing
-- A/B testing between accordion and full-screen modes
-- Workflow efficiency measurements
-- Accessibility compliance testing
-
-This design provides a comprehensive roadmap for implementing an accordion-style UI that maintains context while providing efficient Git operations, closely matching the Magit user experience.
-
-## Implementation Status
-
-### ✅ Phase 1 Complete (January 2025)
-
-**What Works Now:**
-- Section collapse/expand with Tab key and visual indicators (▶/▼)
-- Enter key opens diff view for selected files
-- All existing diff operations preserved (arrow/vim navigation, S/U staging)
-- Clean separation between section management and diff viewing
-
-**Files Modified:**
-- `src/ui/navigation.rs` - Added `SectionCollapsedState` and collapse methods
-- `src/ui/input.rs` - Added `ToggleAccordion` command and Enter key mapping
-- `src/ui/mod.rs` - Added `toggle_accordion()` method  
-- `src/ui/status_view.rs` - Updated rendering to respect collapse states
-
-**Key Insights from Implementation:**
-1. **Simplified Key Bindings**: Tab for sections, Enter for diffs is more intuitive than complex contextual behavior
-2. **Visual Clarity**: Collapse indicators (▶/▼) provide immediate visual feedback
-3. **Backward Compatibility**: All existing functionality preserved while adding new capabilities
-4. **Foundation Ready**: Clean architecture ready for Phase 2 inline diff implementation
-
-**Ready for Phase 2**: The section collapse foundation is solid and ready for inline diff rendering implementation.
+  - Capture baseline timings for expansion/collapse and scroll in large diffs.
+  - Investigate diff rendering hotspots (e.g., line wrapping, syntax highlights).
+  - Apply batching or virtualization tweaks while keeping UI responsive.
+  - Re-run benchmarks to confirm improvements and document resulting metrics.
