@@ -46,6 +46,69 @@ fn test_help_window() {
 }
 
 #[test]
+fn test_down_arrow_does_not_wrap_at_end_of_list() {
+    let test_repo = create_test_repository().expect("Failed to create test repository");
+    let repo_path = test_repo.temp_dir.path();
+
+    struct DirGuard(PathBuf);
+
+    impl Drop for DirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
+    let original_dir = std::env::current_dir().expect("Failed to read current working directory");
+    let _dir_guard = DirGuard(original_dir);
+
+    // Create an unstaged modification and an untracked file
+    std::fs::write(
+        repo_path.join("README.md"),
+        "# Test Repository\nwith changes\n",
+    )
+    .expect("Failed to modify README.md");
+    std::fs::write(repo_path.join("new_file.txt"), "new content\n")
+        .expect("Failed to create new_file.txt");
+
+    let repository =
+        mahgit::repository::Repository::discover(repo_path).expect("Failed to discover repository");
+    std::env::set_current_dir(repo_path).expect("Failed to change working directory");
+
+    let mut test_app =
+        TestApp::with_repository(80, 24, repository).expect("Failed to construct TestApp");
+    test_app.render().expect("Failed to render initial state");
+
+    // Move selection to the last visible entry
+    test_app.send_key_code(KeyCode::Down);
+    test_app
+        .render()
+        .expect("Failed to render after moving down");
+
+    let (last_section, last_index) = {
+        let nav = test_app.navigation();
+        (nav.current_section(), nav.selected_index())
+    };
+
+    // Attempt to move down past the end of the list
+    test_app.send_key_code(KeyCode::Down);
+    test_app
+        .render()
+        .expect("Failed to render after second move down");
+
+    let nav_after = test_app.navigation();
+    assert_eq!(
+        nav_after.current_section(),
+        last_section,
+        "Selection should remain in the same section when pressing Down at the end"
+    );
+    assert_eq!(
+        nav_after.selected_index(),
+        last_index,
+        "Selection index should remain on the last entry when pressing Down again"
+    );
+}
+
+#[test]
 fn test_refresh_functionality() {
     let test_repo = create_test_repository()
         .expect("Failed to create test repository")
@@ -523,10 +586,10 @@ fn test_section_collapse_expand() {
         "Staged file should be visible when section is expanded"
     );
 
-    // Verify expanded icon "▼" appears
+    // Verify expanded icon "▾" appears
     assert!(
-        buffer_content.contains("▼"),
-        "Expanded sections should show ▼ icon"
+        buffer_content.contains("▾"),
+        "Expanded sections should show ▾ icon"
     );
 
     // Test 1: Collapse the Unstaged section
@@ -555,10 +618,10 @@ fn test_section_collapse_expand() {
         buffer_content.contains(staged_file),
         "Staged file should still be visible"
     );
-    // Verify collapsed icon "▶" appears for Unstaged section
+    // Verify collapsed icon "▸" appears for Unstaged section
     assert!(
-        buffer_content.contains("▶"),
-        "Collapsed section should show ▶ icon"
+        buffer_content.contains("▸"),
+        "Collapsed section should show ▸ icon"
     );
 
     // Test 2: Collapse the Untracked section (while Unstaged remains collapsed)

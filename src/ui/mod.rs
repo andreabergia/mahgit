@@ -385,18 +385,30 @@ impl App {
                     match direction {
                         VerticalDirection::Up => {
                             if current == 0 {
-                                self.navigation.reset_inline_diff_selection(&diff_key);
-                                self.navigation.reset_focus();
-                                self.move_file_selection(direction);
+                                let moved = self.move_file_selection(direction);
+                                if moved {
+                                    self.navigation.reset_inline_diff_selection(&diff_key);
+                                    self.navigation.reset_focus();
+                                } else {
+                                    self.navigation.set_focus(NavigationFocus::InlineDiff);
+                                    self.navigation
+                                        .set_current_inline_hunk_index(&diff_key, current);
+                                }
                             } else {
                                 self.navigation.prev_inline_hunk(&diff_key);
                             }
                         }
                         VerticalDirection::Down => {
                             if current + 1 >= total {
-                                self.navigation.reset_inline_diff_selection(&diff_key);
-                                self.navigation.reset_focus();
-                                self.move_file_selection(direction);
+                                let moved = self.move_file_selection(direction);
+                                if moved {
+                                    self.navigation.reset_inline_diff_selection(&diff_key);
+                                    self.navigation.reset_focus();
+                                } else {
+                                    self.navigation.set_focus(NavigationFocus::InlineDiff);
+                                    self.navigation
+                                        .set_current_inline_hunk_index(&diff_key, current);
+                                }
                             } else {
                                 self.navigation.next_inline_hunk(&diff_key);
                             }
@@ -404,7 +416,7 @@ impl App {
                     }
                 } else {
                     self.navigation.reset_focus();
-                    self.move_file_selection(direction);
+                    let _ = self.move_file_selection(direction);
                 }
             }
             NavigationFocus::File => {
@@ -412,7 +424,7 @@ impl App {
                     match direction {
                         VerticalDirection::Down => {
                             if total == 0 {
-                                self.move_file_selection(direction);
+                                let _ = self.move_file_selection(direction);
                             } else {
                                 self.navigation.set_focus(NavigationFocus::InlineDiff);
                                 let clamped_index = current.min(total.saturating_sub(1));
@@ -421,21 +433,27 @@ impl App {
                             }
                         }
                         VerticalDirection::Up => {
-                            self.move_file_selection(direction);
+                            let _ = self.move_file_selection(direction);
                         }
                     }
                 } else {
-                    self.move_file_selection(direction);
+                    let _ = self.move_file_selection(direction);
                 }
             }
         }
     }
 
-    fn move_file_selection(&mut self, direction: VerticalDirection) {
+    fn move_file_selection(&mut self, direction: VerticalDirection) -> bool {
+        let previous_section = self.navigation.current_section();
+        let previous_index = self.navigation.selected_index();
+
         match direction {
             VerticalDirection::Up => self.navigation.move_up(),
             VerticalDirection::Down => self.navigation.move_down(),
         }
+
+        self.navigation.current_section() != previous_section
+            || self.navigation.selected_index() != previous_index
     }
 
     fn focus_inline_diff_and_move(&mut self, direction: InlineHunkDirection) {
