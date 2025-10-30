@@ -9,6 +9,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
+const ICON_COLLAPSED: &str = "▸";
+const ICON_EXPANDED: &str = "▾";
+
 struct ListRenderContext<'a> {
     selected_list_index: &'a mut Option<usize>,
     scroll_targets: &'a mut Vec<usize>,
@@ -161,7 +164,11 @@ impl<'a> StatusView<'a> {
         }
 
         let is_collapsed = self.navigation.is_section_collapsed(section);
-        let collapse_icon = if is_collapsed { "▶" } else { "▼" };
+        let collapse_icon = if is_collapsed {
+            ICON_COLLAPSED
+        } else {
+            ICON_EXPANDED
+        };
         let section_header = format!("{} {} ({})", collapse_icon, header, entries.len());
         let header_style = Style::default()
             .fg(Color::Cyan)
@@ -183,8 +190,6 @@ impl<'a> StatusView<'a> {
         // Only show files if section is not collapsed
         if !is_collapsed {
             for (file_index, entry) in entries.iter().enumerate() {
-                let content = format!("  {} {}", entry.status, entry.path);
-
                 let is_selected = self.navigation.current_section() == section
                     && self.navigation.selected_index() == file_index;
 
@@ -206,18 +211,25 @@ impl<'a> StatusView<'a> {
                     self.get_file_style(section)
                 };
 
-                let mut spans = vec![Span::styled(content, style)];
+                let diff_key = FileDiffKey::new(entry.path.clone(), section.into());
+                let (icon, icon_style) = self.inline_diff_indicator(&diff_key, is_selected);
 
-                if is_selected {
-                    spans.insert(0, Span::styled("> ", Style::default().fg(Color::Yellow)));
+                let mut spans = Vec::new();
+                spans.push(if is_selected {
+                    Span::styled("> ", Style::default().fg(Color::Yellow))
                 } else {
-                    spans.insert(0, Span::raw("  "));
-                }
+                    Span::raw("  ")
+                });
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(format!("{} ", icon), icon_style));
+                spans.push(Span::styled(
+                    format!("{} {}", entry.status, entry.path),
+                    style,
+                ));
 
                 items.push(ListItem::new(Line::from(spans)));
 
                 // Add inline diff content if file diff is expanded
-                let diff_key = FileDiffKey::new(entry.path.clone(), section.into());
                 if let Some(diff_state) = self.navigation.get_file_diff(&diff_key)
                     && diff_state.expanded
                 {
@@ -257,7 +269,11 @@ impl<'a> StatusView<'a> {
         }
 
         let is_collapsed = self.navigation.is_section_collapsed(section);
-        let collapse_icon = if is_collapsed { "▶" } else { "▼" };
+        let collapse_icon = if is_collapsed {
+            ICON_COLLAPSED
+        } else {
+            ICON_EXPANDED
+        };
         let section_header = format!("{} {} ({})", collapse_icon, header, files.len());
         let header_style = Style::default()
             .fg(Color::Cyan)
@@ -283,9 +299,6 @@ impl<'a> StatusView<'a> {
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or(file);
-                let file_indicator = self.get_file_indicator(section);
-                let content = format!("  {} {}", file_indicator, file_name);
-
                 let is_selected = self.navigation.current_section() == section
                     && self.navigation.selected_index() == file_index;
 
@@ -307,18 +320,26 @@ impl<'a> StatusView<'a> {
                     self.get_file_style(section)
                 };
 
-                let mut spans = vec![Span::styled(content, style)];
+                let diff_key = FileDiffKey::new(file.clone(), section.into());
+                let (icon, icon_style) = self.inline_diff_indicator(&diff_key, is_selected);
+                let file_indicator = self.get_file_indicator(section);
 
-                if is_selected {
-                    spans.insert(0, Span::styled("> ", Style::default().fg(Color::Yellow)));
+                let mut spans = Vec::new();
+                spans.push(if is_selected {
+                    Span::styled("> ", Style::default().fg(Color::Yellow))
                 } else {
-                    spans.insert(0, Span::raw("  "));
-                }
+                    Span::raw("  ")
+                });
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(format!("{} ", icon), icon_style));
+                spans.push(Span::styled(
+                    format!("{} {}", file_indicator, file_name),
+                    style,
+                ));
 
                 items.push(ListItem::new(Line::from(spans)));
 
                 // Add inline diff content if file diff is expanded
-                let diff_key = FileDiffKey::new(file.clone(), section.into());
                 if let Some(diff_state) = self.navigation.get_file_diff(&diff_key)
                     && diff_state.expanded
                 {
@@ -420,5 +441,28 @@ impl<'a> StatusView<'a> {
                 items.push(ListItem::new(Line::from("")));
             }
         }
+    }
+}
+
+impl<'a> StatusView<'a> {
+    fn inline_diff_indicator(&self, key: &FileDiffKey, is_selected: bool) -> (&'static str, Style) {
+        let expanded = self.navigation.is_file_diff_expanded(key);
+        let mut icon_style = if expanded {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        if is_selected {
+            icon_style = icon_style.bg(Color::DarkGray).add_modifier(Modifier::BOLD);
+        }
+
+        let icon = if expanded {
+            ICON_EXPANDED
+        } else {
+            ICON_COLLAPSED
+        };
+
+        (icon, icon_style)
     }
 }

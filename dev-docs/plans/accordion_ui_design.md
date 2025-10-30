@@ -336,23 +336,10 @@ The next batch of work should land in the order below because each step sets up 
    - ✅ Exercise the UI with very wide terminals and nested expand/collapse cycles to confirm there are no lingering ghost lines.
 
 #### Phase 4: Polish and Optimization
-- Add visual indicators for expanded states
-  - Review current accordion widgets to confirm where expansion status is rendered.
-  - Select arrow/chevron glyphs that match the existing TUI style and palette.
-  - Update focus and toggle handlers so indicators stay in sync with state changes.
-  - Validate indicator accessibility (contrast, screen-reader labels if supported).
-- Implement smooth scrolling behavior
-  - Profile current scroll jumps with large panels to identify jitter.
-  - Introduce incremental scrolling logic that keeps redraw cost bounded.
-  - Ensure keyboard repeat events and mouse wheel inputs reuse the same path.
-  - Test with long diff previews in `.tmp/` repositories to check responsiveness.
-- Add keyboard shortcuts help updates (emphasize Tab key context behavior)
-  - Inventory current shortcut listings in the help modal/popup.
-  - Add context-specific description for the `Tab` key and related navigation keys.
-  - Sync documentation and on-screen hints so both reflect the new behavior.
-  - Verify help overlay rendering in narrow and wide layouts.
-- Performance tuning for large diffs
-  - Capture baseline timings for expansion/collapse and scroll in large diffs.
-  - Investigate diff rendering hotspots (e.g., line wrapping, syntax highlights).
-  - Apply batching or virtualization tweaks while keeping UI responsive.
-  - Re-run benchmarks to confirm improvements and document resulting metrics.
+- ✅ Add visual indicators for expanded states
+  - Unified the chevron glyphs to `▸/▾` for both sections and file rows so expanded state is consistently communicated.
+  - Injected inline diff indicators beside file entries that inherit selection styling, keeping the visual state in sync with navigation focus.
+  - Styled expanded indicators with high-contrast yellow and collapsed indicators with dim gray to remain legible against the TUI theme.
+- ✅ Add keyboard shortcuts help updates (emphasize Tab key context behavior)
+  - Updated the help overlay to explain the context-aware Tab handling and reference the ▸/▾ indicators.
+  - Confirmed remaining shortcut descriptions still match the simplified staging and inline diff navigation workflow.

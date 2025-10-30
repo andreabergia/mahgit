@@ -266,7 +266,7 @@ impl InputHandler {
             "  G/End   Jump to bottom / Bottom of diff",
             "",
             "Section & Diff Navigation:",
-            "  Tab     Toggle section collapsed/expanded or toggle inline diff",
+            "  Tab     Collapse/expand section headers (▸/▾) or the selected file's inline diff",
             "  Enter   Open file in editor",
             "  f/PgDn  Page down in diff",
             "  b/PgUp  Page up in diff",
