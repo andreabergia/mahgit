@@ -295,10 +295,13 @@ impl<'a> StatusView<'a> {
         // Only show files if section is not collapsed
         if !is_collapsed {
             for (file_index, file) in files.iter().enumerate() {
-                let file_name = std::path::Path::new(file)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(file);
+                let display_name = match section {
+                    StatusSection::Untracked => file.as_str(),
+                    _ => std::path::Path::new(file)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(file),
+                };
                 let is_selected = self.navigation.current_section() == section
                     && self.navigation.selected_index() == file_index;
 
@@ -333,7 +336,7 @@ impl<'a> StatusView<'a> {
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(format!("{} ", icon), icon_style));
                 spans.push(Span::styled(
-                    format!("{} {}", file_indicator, file_name),
+                    format!("{} {}", file_indicator, display_name),
                     style,
                 ));
 
