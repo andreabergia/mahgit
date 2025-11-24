@@ -18,7 +18,7 @@ use crossterm::{
 };
 use feedback::FeedbackManager;
 use input::{Command, InputHandler};
-use navigation::{FileDiffKey, NavigationFocus, NavigationState, SelectedFile};
+use navigation::{FileDiffKey, NavigationState, SelectedFile, SelectionCursor};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use status_view::StatusView;
 use std::io::{Stdout, stdout};
@@ -46,11 +46,6 @@ enum StageAction {
 enum VerticalDirection {
     Up,
     Down,
-}
-
-enum InlineHunkDirection {
-    Previous,
-    Next,
 }
 
 impl App {
@@ -157,28 +152,14 @@ impl App {
 
     fn handle_command(&mut self, command: Command) {
         match command {
-            Command::MoveUp => {
-                self.navigation.reset_focus();
-                self.navigation.move_up();
+            Command::MoveUp | Command::ScrollDiffUp => self.move_cursor(VerticalDirection::Up),
+            Command::MoveDown | Command::ScrollDiffDown => {
+                self.move_cursor(VerticalDirection::Down)
             }
-            Command::MoveDown => {
-                self.navigation.reset_focus();
-                self.navigation.move_down();
-            }
-            Command::ScrollViewportUp => {
-                self.navigation.scroll_viewport_up(1);
-            }
-            Command::ScrollViewportDown => {
-                self.navigation.scroll_viewport_down(1);
-            }
-            Command::MoveToTop => {
-                self.navigation.reset_focus();
-                self.navigation.move_to_top();
-            }
-            Command::MoveToBottom => {
-                self.navigation.reset_focus();
-                self.navigation.move_to_bottom();
-            }
+            Command::ScrollViewportUp => self.navigation.scroll_viewport_up(1),
+            Command::ScrollViewportDown => self.navigation.scroll_viewport_down(1),
+            Command::MoveToTop => self.navigation.move_to_top(&self.status),
+            Command::MoveToBottom => self.navigation.move_to_bottom(&self.status),
             Command::Quit | Command::ForceQuit => {
                 self.should_quit = true;
             }
@@ -209,27 +190,13 @@ impl App {
             Command::ToggleAccordion => {
                 self.toggle_accordion();
             }
-            Command::ScrollDiffUp => {
-                self.handle_vertical_navigation(VerticalDirection::Up);
-            }
-            Command::ScrollDiffDown => {
-                self.handle_vertical_navigation(VerticalDirection::Down);
-            }
-            Command::PageDiffUp | Command::PreviousHunk => {
-                self.focus_inline_diff_and_move(InlineHunkDirection::Previous)
-            }
-            Command::PageDiffDown | Command::NextHunk => {
-                self.focus_inline_diff_and_move(InlineHunkDirection::Next)
-            }
-            Command::JumpToPreviousHunk => {
-                self.jump_to_change(VerticalDirection::Up);
-            }
-            Command::JumpToNextHunk => {
-                self.jump_to_change(VerticalDirection::Down);
-            }
-            Command::PageForward => {
-                self.page_forward();
-            }
+            Command::PageDiffUp => self.scroll_full_page(VerticalDirection::Up),
+            Command::PageDiffDown => self.scroll_full_page(VerticalDirection::Down),
+            Command::PreviousHunk => self.scroll_half_page(VerticalDirection::Up),
+            Command::NextHunk => self.scroll_half_page(VerticalDirection::Down),
+            Command::JumpToPreviousHunk => self.jump_within_parent(VerticalDirection::Up),
+            Command::JumpToNextHunk => self.jump_within_parent(VerticalDirection::Down),
+            Command::PageForward => self.scroll_full_page(VerticalDirection::Down),
             Command::GoToTopOfDiff => {
                 // TODO: Implement inline diff navigation
             }
@@ -255,6 +222,7 @@ impl App {
         } else {
             self.navigation.update_status(&self.status);
             self.navigation.clear_diff_cache();
+            self.navigation.ensure_cursor_valid(&self.status);
             self.feedback_manager
                 .show_result(crate::operations::OperationResult::new(
                     "Status refreshed".to_string(),
@@ -315,20 +283,12 @@ impl App {
             self.navigation.update_status(&self.status);
             // Clear diff cache when status changes
             self.navigation.clear_diff_cache();
-            self.navigation.reset_focus();
+            self.navigation.ensure_cursor_valid(&self.status);
         }
     }
 
     fn toggle_accordion(&mut self) {
-        self.navigation.reset_focus();
-        if self.navigation.is_on_section_header() {
-            // Toggle section collapsed/expanded
-            let current_section = self.navigation.current_section();
-            self.navigation.toggle_section_collapsed(current_section);
-        } else {
-            // Toggle file diff display
-            self.toggle_inline_diff();
-        }
+        self.toggle_inline_diff();
     }
 
     fn toggle_inline_diff(&mut self) {
@@ -336,36 +296,25 @@ impl App {
             let diff_context = self.determine_diff_context(&selected_file);
             let diff_key = FileDiffKey::new(selected_file.path.clone(), selected_file.context);
 
-            // Check if diff is already expanded
-            if self.navigation.is_file_diff_expanded(&diff_key) {
-                // Collapse the diff
-                self.navigation
-                    .toggle_file_diff_expanded(diff_key.clone(), diff_context);
-                self.navigation.reset_inline_diff_selection(&diff_key);
-                self.navigation.reset_focus();
-            } else if self
-                .navigation
-                .has_cached_diff_for(&diff_key, &diff_context)
+            if self.navigation.is_file_diff_expanded(&diff_key)
+                || self
+                    .navigation
+                    .has_cached_diff_for(&diff_key, &diff_context)
             {
                 self.navigation
                     .toggle_file_diff_expanded(diff_key.clone(), diff_context);
                 self.navigation.reset_inline_diff_selection(&diff_key);
-                self.navigation.reset_focus();
             } else {
-                // Generate the diff first before marking as expanded
                 let diff_generator = DiffGenerator::new(self.repository.git2_repo());
                 match diff_generator.generate_diff(&selected_file.path, diff_context.clone()) {
                     Ok(diff) => {
-                        // Only expand if diff generation succeeds
                         self.navigation
                             .toggle_file_diff_expanded(diff_key.clone(), diff_context.clone());
                         self.navigation
                             .set_file_diff(diff_key.clone(), diff, diff_context);
                         self.navigation.reset_inline_diff_selection(&diff_key);
-                        self.navigation.reset_focus();
                     }
                     Err(err) => {
-                        // Show error in feedback - don't expand the diff
                         self.feedback_manager
                             .show_result(crate::operations::OperationResult::new(format!(
                                 "Failed to generate diff for {}: {}",
@@ -374,198 +323,86 @@ impl App {
                     }
                 }
             }
+            self.navigation.ensure_cursor_valid(&self.status);
         }
     }
 
-    fn handle_vertical_navigation(&mut self, direction: VerticalDirection) {
-        let inline_info = self.current_inline_diff_info();
-        match self.navigation.focus() {
-            NavigationFocus::InlineDiff => {
-                if let Some((diff_key, current, total)) = inline_info {
-                    match direction {
-                        VerticalDirection::Up => {
-                            if current == 0 {
-                                let moved = self.move_file_selection(direction);
-                                if moved {
-                                    self.navigation.reset_inline_diff_selection(&diff_key);
-                                    self.navigation.reset_focus();
-                                } else {
-                                    self.navigation.set_focus(NavigationFocus::InlineDiff);
-                                    self.navigation
-                                        .set_current_inline_hunk_index(&diff_key, current);
-                                }
-                            } else {
-                                self.navigation.prev_inline_hunk(&diff_key);
-                            }
-                        }
-                        VerticalDirection::Down => {
-                            if current + 1 >= total {
-                                let moved = self.move_file_selection(direction);
-                                if moved {
-                                    self.navigation.reset_inline_diff_selection(&diff_key);
-                                    self.navigation.reset_focus();
-                                } else {
-                                    self.navigation.set_focus(NavigationFocus::InlineDiff);
-                                    self.navigation
-                                        .set_current_inline_hunk_index(&diff_key, current);
-                                }
-                            } else {
-                                self.navigation.next_inline_hunk(&diff_key);
-                            }
-                        }
-                    }
-                } else {
-                    self.navigation.reset_focus();
-                    let _ = self.move_file_selection(direction);
-                }
-            }
-            NavigationFocus::File => {
-                if let Some((diff_key, current, total)) = inline_info {
-                    match direction {
-                        VerticalDirection::Down => {
-                            if total == 0 {
-                                let _ = self.move_file_selection(direction);
-                            } else {
-                                self.navigation.set_focus(NavigationFocus::InlineDiff);
-                                let clamped_index = current.min(total.saturating_sub(1));
-                                self.navigation
-                                    .set_current_inline_hunk_index(&diff_key, clamped_index);
-                            }
-                        }
-                        VerticalDirection::Up => {
-                            let _ = self.move_file_selection(direction);
-                        }
-                    }
-                } else {
-                    let _ = self.move_file_selection(direction);
-                }
-            }
-        }
-    }
-
-    fn move_file_selection(&mut self, direction: VerticalDirection) -> bool {
-        let previous_section = self.navigation.current_section();
-        let previous_index = self.navigation.selected_index();
-
+    fn move_cursor(&mut self, direction: VerticalDirection) {
         match direction {
-            VerticalDirection::Up => self.navigation.move_up(),
-            VerticalDirection::Down => self.navigation.move_down(),
+            VerticalDirection::Up => self.navigation.move_to_previous(&self.status),
+            VerticalDirection::Down => self.navigation.move_to_next(&self.status),
         }
-
-        self.navigation.current_section() != previous_section
-            || self.navigation.selected_index() != previous_index
+        self.navigation.ensure_cursor_valid(&self.status);
     }
 
-    fn focus_inline_diff_and_move(&mut self, direction: InlineHunkDirection) {
-        if let Some((diff_key, current, total)) = self.current_inline_diff_info() {
-            self.navigation.set_focus(NavigationFocus::InlineDiff);
-            match direction {
-                InlineHunkDirection::Previous => {
-                    if current > 0 {
-                        self.navigation.prev_inline_hunk(&diff_key);
-                    }
-                }
-                InlineHunkDirection::Next => {
-                    if current + 1 < total {
-                        self.navigation.next_inline_hunk(&diff_key);
-                    }
-                }
-            }
+    fn scroll_half_page(&self, direction: VerticalDirection) {
+        let height = self.navigation.viewport_height().max(1);
+        let step = (height / 2).max(1);
+        match direction {
+            VerticalDirection::Up => self.navigation.scroll_viewport_up(step),
+            VerticalDirection::Down => self.navigation.scroll_viewport_down(step),
         }
     }
 
-    fn jump_to_change(&mut self, direction: VerticalDirection) {
-        if let Some((diff_key, current, total)) = self.current_inline_diff_info() {
-            match direction {
-                VerticalDirection::Down => {
-                    if self.navigation.focus() == NavigationFocus::InlineDiff {
-                        if current + 1 < total {
-                            self.navigation.next_inline_hunk(&diff_key);
-                            return;
-                        }
-                        self.navigation.reset_inline_diff_selection(&diff_key);
-                        self.navigation.reset_focus();
-                        self.navigation.move_down();
-                        return;
-                    }
+    fn scroll_full_page(&self, direction: VerticalDirection) {
+        let height = self.navigation.viewport_height().max(1);
+        match direction {
+            VerticalDirection::Up => self.navigation.scroll_viewport_up(height),
+            VerticalDirection::Down => self.navigation.scroll_viewport_down(height),
+        }
+    }
 
-                    if total > 0 {
-                        self.navigation.set_focus(NavigationFocus::InlineDiff);
-                        self.navigation.set_current_inline_hunk_index(&diff_key, 0);
-                        return;
-                    }
-
-                    self.navigation.reset_focus();
-                    self.navigation.move_down();
-                    return;
-                }
-                VerticalDirection::Up => {
-                    if self.navigation.focus() == NavigationFocus::InlineDiff {
-                        if current > 0 {
-                            self.navigation.prev_inline_hunk(&diff_key);
-                            return;
-                        }
-                        self.navigation.reset_inline_diff_selection(&diff_key);
-                        self.navigation.reset_focus();
-                        return;
-                    }
-
-                    self.navigation.reset_focus();
-                    self.navigation.move_up();
-                    if let Some((prev_key, _, prev_total)) = self
-                        .current_inline_diff_info()
-                        .filter(|(_, _, count)| *count > 0)
-                    {
-                        let last_hunk = prev_total.saturating_sub(1);
-                        self.navigation.set_focus(NavigationFocus::InlineDiff);
+    fn jump_within_parent(&mut self, direction: VerticalDirection) {
+        if let Some((section, file_index, hunk_index)) = self.navigation.cursor_position() {
+            let next_cursor = match hunk_index {
+                Some(_) => {
+                    let hunk_count =
                         self.navigation
-                            .set_current_inline_hunk_index(&prev_key, last_hunk);
+                            .hunk_count_for_file(&self.status, section, file_index);
+                    if hunk_count == 0 {
+                        SelectionCursor::File {
+                            section,
+                            file_index,
+                        }
+                    } else {
+                        let target = match direction {
+                            VerticalDirection::Up => 0,
+                            VerticalDirection::Down => hunk_count.saturating_sub(1),
+                        };
+                        SelectionCursor::Hunk {
+                            section,
+                            file_index,
+                            hunk_index: target,
+                        }
                     }
-                    return;
                 }
-            }
-        }
+                None => {
+                    let last_index = self
+                        .navigation
+                        .section_file_count(&self.status, section)
+                        .saturating_sub(1);
+                    let target = match direction {
+                        VerticalDirection::Up => 0,
+                        VerticalDirection::Down => last_index,
+                    };
+                    SelectionCursor::File {
+                        section,
+                        file_index: target,
+                    }
+                }
+            };
 
-        match direction {
-            VerticalDirection::Down => {
-                self.navigation.reset_focus();
-                self.navigation.move_down();
-            }
-            VerticalDirection::Up => {
-                self.navigation.reset_focus();
-                self.navigation.move_up();
-            }
+            self.navigation
+                .apply_cursor(&self.status, Some(next_cursor));
+            self.navigation.clear_manual_scroll();
         }
-    }
-
-    fn page_forward(&mut self) {
-        let height = self.navigation.viewport_height();
-        if height == 0 {
-            return;
-        }
-        let step = height.saturating_sub(1).max(1);
-        self.navigation.scroll_viewport_down(step);
-    }
-
-    fn current_inline_diff_info(&self) -> Option<(FileDiffKey, usize, usize)> {
-        let selected = self.navigation.get_selected_file(&self.status)?;
-        let diff_key = FileDiffKey::new(selected.path.clone(), selected.context);
-        let state = self.navigation.get_file_diff(&diff_key)?;
-        if !state.expanded {
-            return None;
-        }
-        let diff = state.diff.as_ref()?;
-        if diff.hunks.is_empty() {
-            return None;
-        }
-        Some((diff_key, state.current_hunk, diff.hunks.len()))
     }
 
     fn is_inline_diff_focused(&self) -> bool {
-        if self.navigation.focus() != NavigationFocus::InlineDiff {
-            return false;
-        }
-        self.current_inline_diff_info().is_some()
+        matches!(
+            self.navigation.current_cursor(),
+            Some(SelectionCursor::Hunk { .. })
+        )
     }
 
     fn determine_diff_context(&self, file: &SelectedFile) -> crate::diff::DiffContext {
@@ -581,79 +418,93 @@ impl App {
 
     fn inline_stage_current_hunk(&mut self) {
         use navigation::FileContext;
-        if let Some(sel) = self.navigation.get_selected_file(&self.status) {
-            let diff_key = FileDiffKey::new(sel.path.clone(), sel.context);
-            if let Some(state) = self.navigation.get_file_diff(&diff_key)
-                && let Some(diff) = &state.diff
-            {
-                let manual_scroll_state = if self.navigation.is_manual_scroll_active() {
-                    Some(self.navigation.scroll_offset())
-                } else {
-                    None
-                };
+        let Some(sel) = self.navigation.get_selected_file(&self.status) else {
+            return;
+        };
+        let Some((section, file_index, _)) = self.navigation.cursor_position() else {
+            return;
+        };
 
-                let idx = state.current_hunk.min(diff.hunks.len().saturating_sub(1));
-                if let Some(hunk) = diff.hunks.get(idx) {
-                    let stager = HunkStager::new(&self.repository);
-                    let res = match sel.context {
-                        FileContext::Unstaged | FileContext::Untracked => {
-                            stager.stage_hunk(&sel.path, hunk)
-                        }
-                        FileContext::Staged => stager.unstage_hunk(&sel.path, hunk),
-                        FileContext::Conflicted => Err(crate::repository::RepositoryError::Other(
-                            "Cannot modify conflicted files".into(),
-                        )),
-                    };
-                    match res {
-                        Ok(r) => {
-                            // Preserve selection and move to next hunk after refresh
-                            let prev_index = state.current_hunk;
-                            let prev_ctx = state.diff_context.clone();
-                            let diff_key_clone = diff_key.clone();
+        let diff_key = FileDiffKey::new(sel.path.clone(), sel.context);
+        let Some(state) = self.navigation.get_file_diff(&diff_key) else {
+            return;
+        };
+        let Some(diff) = &state.diff else {
+            return;
+        };
+        if diff.hunks.is_empty() {
+            return;
+        }
 
-                            self.feedback_manager.show_result(r);
-                            self.refresh_status_after_operation();
+        let manual_scroll_state = if self.navigation.is_manual_scroll_active() {
+            Some(self.navigation.scroll_offset())
+        } else {
+            None
+        };
 
-                            // Regenerate and re-expand inline diff for the same file
-                            let diff_generator =
-                                crate::diff::DiffGenerator::new(self.repository.git2_repo());
-                            if let Ok(new_diff) =
-                                diff_generator.generate_diff(&diff_key_clone.path, prev_ctx.clone())
-                            {
-                                self.navigation.set_file_diff(
-                                    diff_key_clone.clone(),
-                                    new_diff,
-                                    prev_ctx,
-                                );
-                                // Move selection to next hunk (same index after removal), clamp
-                                if let Some(state2) = self.navigation.get_file_diff(&diff_key_clone)
-                                {
-                                    let len =
-                                        state2.diff.as_ref().map(|d| d.hunks.len()).unwrap_or(0);
-                                    let next = if len == 0 {
-                                        0
-                                    } else {
-                                        prev_index.min(len.saturating_sub(1))
-                                    };
-                                    self.navigation
-                                        .set_current_inline_hunk_index(&diff_key_clone, next);
+        let current_hunk = match self.navigation.current_cursor() {
+            Some(SelectionCursor::Hunk { hunk_index, .. }) => hunk_index,
+            _ => state.current_hunk,
+        }
+        .min(diff.hunks.len().saturating_sub(1));
+
+        if let Some(hunk) = diff.hunks.get(current_hunk) {
+            let stager = HunkStager::new(&self.repository);
+            let res = match sel.context {
+                FileContext::Unstaged | FileContext::Untracked => {
+                    stager.stage_hunk(&sel.path, hunk)
+                }
+                FileContext::Staged => stager.unstage_hunk(&sel.path, hunk),
+                FileContext::Conflicted => Err(crate::repository::RepositoryError::Other(
+                    "Cannot modify conflicted files".into(),
+                )),
+            };
+            match res {
+                Ok(r) => {
+                    let prev_ctx = state.diff_context.clone();
+                    let diff_key_clone = diff_key.clone();
+                    self.feedback_manager.show_result(r);
+                    self.refresh_status_after_operation();
+
+                    let diff_generator =
+                        crate::diff::DiffGenerator::new(self.repository.git2_repo());
+                    if let Ok(new_diff) =
+                        diff_generator.generate_diff(&diff_key_clone.path, prev_ctx.clone())
+                    {
+                        self.navigation
+                            .set_file_diff(diff_key_clone.clone(), new_diff, prev_ctx);
+
+                        if let Some(state2) = self.navigation.get_file_diff(&diff_key_clone) {
+                            let len = state2.diff.as_ref().map(|d| d.hunks.len()).unwrap_or(0);
+                            let next_cursor = if len == 0 {
+                                SelectionCursor::File {
+                                    section,
+                                    file_index,
                                 }
-                                self.navigation.set_focus(NavigationFocus::InlineDiff);
-                                if let Some(offset) = manual_scroll_state {
-                                    self.navigation.set_scroll_offset(offset);
-                                    self.navigation.set_manual_scroll_active(true);
+                            } else {
+                                SelectionCursor::Hunk {
+                                    section,
+                                    file_index,
+                                    hunk_index: current_hunk.min(len.saturating_sub(1)),
                                 }
-                            }
+                            };
+
+                            self.navigation
+                                .apply_cursor(&self.status, Some(next_cursor));
                         }
-                        Err(e) => {
-                            self.feedback_manager.show_result(
-                                crate::operations::OperationResult::new(format!(
-                                    "Hunk operation failed: {}",
-                                    e
-                                )),
-                            );
+
+                        if let Some(offset) = manual_scroll_state {
+                            self.navigation.set_scroll_offset(offset);
+                            self.navigation.set_manual_scroll_active(true);
                         }
                     }
+                }
+                Err(e) => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(format!(
+                            "Hunk operation failed: {}",
+                            e
+                        )));
                 }
             }
         }
@@ -676,6 +527,7 @@ impl App {
     }
 
     pub fn render(&mut self, f: &mut ratatui::Frame) {
+        self.navigation.ensure_cursor_valid(&self.status);
         let area = f.area();
 
         // Always render the status view (now with inline diffs)

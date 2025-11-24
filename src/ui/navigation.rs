@@ -3,6 +3,19 @@ use crate::status::RepositoryStatus;
 use std::cell::Cell;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionCursor {
+    File {
+        section: StatusSection,
+        file_index: usize,
+    },
+    Hunk {
+        section: StatusSection,
+        file_index: usize,
+        hunk_index: usize,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct SelectedFile {
     pub path: String,
@@ -55,26 +68,18 @@ pub struct InlineDiffState {
     pub current_hunk: usize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NavigationFocus {
-    File,
-    InlineDiff,
-}
-
 pub struct NavigationState {
-    current_section: StatusSection,
-    selected_index: usize,
+    cursor: Option<SelectionCursor>,
     sections: Vec<SectionInfo>,
     section_collapsed: SectionCollapsedState,
     file_diffs: HashMap<FileDiffKey, InlineDiffState>,
-    focus: NavigationFocus,
     scroll_offset: Cell<usize>,
     viewport_height: Cell<usize>,
     max_scroll_offset: Cell<usize>,
     manual_scroll_active: Cell<bool>,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StatusSection {
     Staged,
     Unstaged,
@@ -96,25 +101,18 @@ impl From<StatusSection> for FileContext {
 #[derive(Clone, Debug)]
 struct SectionInfo {
     section_type: StatusSection,
-    file_count: usize,
-    start_index: usize,
 }
 
 impl NavigationState {
     pub fn new(status: &RepositoryStatus) -> Self {
         let sections = Self::build_sections(status);
-        let current_section = sections
-            .first()
-            .map(|s| s.section_type)
-            .unwrap_or(StatusSection::Conflicted);
+        let cursor = Self::first_file_cursor_from_sections(&sections);
 
         Self {
-            current_section,
-            selected_index: 0,
+            cursor,
             sections,
             section_collapsed: SectionCollapsedState::default(),
             file_diffs: HashMap::new(),
-            focus: NavigationFocus::File,
             scroll_offset: Cell::new(0),
             viewport_height: Cell::new(1),
             max_scroll_offset: Cell::new(0),
@@ -124,144 +122,117 @@ impl NavigationState {
 
     pub fn update_status(&mut self, status: &RepositoryStatus) {
         let new_sections = Self::build_sections(status);
-        let current_global_index = self.get_global_index();
-
+        let prev_cursor = self.cursor;
         self.sections = new_sections;
 
-        if let Some(new_position) = self.find_closest_position(current_global_index) {
-            self.current_section = new_position.0;
-            self.selected_index = new_position.1;
-        } else {
-            self.reset_to_first_available();
+        if let Some(cursor) = prev_cursor
+            .and_then(|c| self.map_cursor_to_status(status, c))
+            .or_else(|| Self::first_file_cursor_from_sections(&self.sections))
+        {
+            self.cursor = Some(cursor);
         }
-        self.focus = NavigationFocus::File;
+
+        self.ensure_cursor_valid(status);
         self.reset_scroll_position();
         self.clear_manual_scroll();
     }
 
-    pub fn move_up(&mut self) {
-        self.focus = NavigationFocus::File;
+    pub fn move_to_previous(&mut self, status: &RepositoryStatus) {
         self.clear_manual_scroll();
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-        } else if let Some(prev_section) = self.find_previous_non_empty_section() {
-            self.current_section = prev_section;
-            self.selected_index = self
-                .get_current_section_info()
-                .map(|s| s.file_count.saturating_sub(1))
-                .unwrap_or(0);
-        }
-    }
-
-    pub fn move_down(&mut self) {
-        self.focus = NavigationFocus::File;
-        self.clear_manual_scroll();
-        if let Some(section_info) = self.get_current_section_info() {
-            if self.selected_index + 1 < section_info.file_count {
-                self.selected_index += 1;
-            } else if let Some(next_section) = self.find_next_non_empty_section() {
-                self.current_section = next_section;
-                self.selected_index = 0;
+        if let Some(cursor) = self.current_cursor() {
+            if let Some(prev) = self.previous_cursor(status, &cursor) {
+                self.apply_cursor(status, Some(prev));
             }
+        } else {
+            self.apply_cursor(status, self.first_file_cursor(status));
         }
     }
 
-    pub fn move_to_top(&mut self) {
-        self.focus = NavigationFocus::File;
+    pub fn move_to_next(&mut self, status: &RepositoryStatus) {
         self.clear_manual_scroll();
-        self.reset_to_first_available();
-    }
-
-    pub fn move_to_bottom(&mut self) {
-        self.focus = NavigationFocus::File;
-        self.clear_manual_scroll();
-        if let Some(last_section) = self.sections.last()
-            && last_section.file_count > 0
-        {
-            self.current_section = last_section.section_type;
-            self.selected_index = last_section.file_count - 1;
+        if let Some(cursor) = self.current_cursor() {
+            if let Some(next) = self.next_cursor(status, &cursor) {
+                self.apply_cursor(status, Some(next));
+            }
+        } else {
+            self.apply_cursor(status, self.first_file_cursor(status));
         }
     }
 
-    pub fn current_section(&self) -> StatusSection {
-        self.current_section
+    pub fn move_to_top(&mut self, status: &RepositoryStatus) {
+        self.clear_manual_scroll();
+        self.apply_cursor(status, self.first_file_cursor(status));
     }
 
-    pub fn selected_index(&self) -> usize {
-        self.selected_index
+    pub fn move_to_bottom(&mut self, status: &RepositoryStatus) {
+        self.clear_manual_scroll();
+        self.apply_cursor(status, self.last_file_cursor(status));
     }
 
-    pub fn get_global_index(&self) -> usize {
-        let current_section_start = self
-            .sections
-            .iter()
-            .find(|s| s.section_type == self.current_section)
-            .map(|s| s.start_index)
-            .unwrap_or(0);
+    pub fn current_section(&self) -> Option<StatusSection> {
+        self.cursor.as_ref().map(|c| match c {
+            SelectionCursor::File { section, .. } | SelectionCursor::Hunk { section, .. } => {
+                *section
+            }
+        })
+    }
 
-        current_section_start + self.selected_index
+    pub fn selected_index(&self) -> Option<usize> {
+        self.cursor.as_ref().map(|cursor| match cursor {
+            SelectionCursor::File { file_index, .. } | SelectionCursor::Hunk { file_index, .. } => {
+                *file_index
+            }
+        })
+    }
+
+    pub fn current_cursor(&self) -> Option<SelectionCursor> {
+        self.cursor
+    }
+
+    pub fn cursor_position(&self) -> Option<(StatusSection, usize, Option<usize>)> {
+        match self.cursor? {
+            SelectionCursor::File {
+                section,
+                file_index,
+            } => Some((section, file_index, None)),
+            SelectionCursor::Hunk {
+                section,
+                file_index,
+                hunk_index,
+            } => Some((section, file_index, Some(hunk_index))),
+        }
     }
 
     pub fn has_selections(&self) -> bool {
-        !self.sections.is_empty() && self.sections.iter().any(|s| s.file_count > 0)
+        self.cursor.is_some()
     }
 
     pub fn get_selected_file(&self, status: &RepositoryStatus) -> Option<SelectedFile> {
-        if !self.has_selections() {
-            return None;
-        }
-
-        let path = match self.current_section {
-            StatusSection::Staged => {
-                let files = status.staged_files();
-                if self.selected_index < files.len() {
-                    files[self.selected_index].path.clone()
-                } else {
-                    return None;
-                }
+        let cursor = self.cursor?;
+        let section = match cursor {
+            SelectionCursor::File { section, .. } | SelectionCursor::Hunk { section, .. } => {
+                section
             }
-            StatusSection::Unstaged => {
-                let files = status.unstaged_files();
-                if self.selected_index < files.len() {
-                    files[self.selected_index].path.clone()
-                } else {
-                    return None;
-                }
-            }
-            StatusSection::Untracked => {
-                let files = status.untracked_files();
-                if self.selected_index < files.len() {
-                    files[self.selected_index].clone()
-                } else {
-                    return None;
-                }
-            }
-            StatusSection::Conflicted => {
-                let files = status.conflicted_files();
-                if self.selected_index < files.len() {
-                    files[self.selected_index].clone()
-                } else {
-                    return None;
-                }
+        };
+        let file_index = match cursor {
+            SelectionCursor::File { file_index, .. } | SelectionCursor::Hunk { file_index, .. } => {
+                file_index
             }
         };
 
-        let context = match self.current_section {
-            StatusSection::Staged => FileContext::Staged,
-            StatusSection::Unstaged => FileContext::Unstaged,
-            StatusSection::Untracked => FileContext::Untracked,
-            StatusSection::Conflicted => FileContext::Conflicted,
-        };
+        let path = self.file_path(status, section, file_index)?;
+        let context: FileContext = section.into();
 
         Some(SelectedFile { path, context })
     }
 
     pub fn get_operation_context(&self) -> OperationContext {
-        match self.current_section {
-            StatusSection::Staged => OperationContext::CanUnstage,
-            StatusSection::Unstaged => OperationContext::CanStage,
-            StatusSection::Untracked => OperationContext::CanAdd,
-            StatusSection::Conflicted => OperationContext::ReadOnly,
+        match self.current_section() {
+            Some(StatusSection::Staged) => OperationContext::CanUnstage,
+            Some(StatusSection::Unstaged) => OperationContext::CanStage,
+            Some(StatusSection::Untracked) => OperationContext::CanAdd,
+            Some(StatusSection::Conflicted) => OperationContext::ReadOnly,
+            None => OperationContext::ReadOnly,
         }
     }
 
@@ -358,28 +329,6 @@ impl NavigationState {
         self.file_diffs.clear();
     }
 
-    pub fn is_on_section_header(&self) -> bool {
-        // In the current implementation, we're always on files, not section headers
-        // The section headers are rendered but not navigable
-        // This method determines if Tab should toggle section vs file diff
-
-        // For now, implement a simple heuristic:
-        // If selected_index is 0 and there are files in current section, we're on first file
-        // If the user wants true section header navigation, we'd need to modify the rendering
-        // to include navigable section headers in the list
-
-        // Return false for now - always toggle file diff
-        // This preserves existing behavior while adding the infrastructure for future enhancement
-        false
-    }
-
-    pub fn set_current_inline_hunk_index(&mut self, key: &FileDiffKey, idx: usize) {
-        if let Some(state) = self.file_diffs.get_mut(key) {
-            state.current_hunk = idx;
-            self.clear_manual_scroll();
-        }
-    }
-
     pub fn reset_inline_diff_selection(&mut self, key: &FileDiffKey) {
         if let Some(state) = self.file_diffs.get_mut(key) {
             state.current_hunk = 0;
@@ -387,47 +336,9 @@ impl NavigationState {
         }
     }
 
-    pub fn get_current_inline_hunk_index(&self, key: &FileDiffKey) -> Option<usize> {
-        self.file_diffs.get(key).map(|s| s.current_hunk)
-    }
-
-    pub fn next_inline_hunk(&mut self, key: &FileDiffKey) {
-        if let Some(state) = self.file_diffs.get_mut(key)
-            && let Some(diff) = &state.diff
-            && !diff.hunks.is_empty()
-            && state.current_hunk + 1 < diff.hunks.len()
-        {
-            state.current_hunk += 1;
-            self.clear_manual_scroll();
-        }
-    }
-
-    pub fn prev_inline_hunk(&mut self, key: &FileDiffKey) {
-        if let Some(state) = self.file_diffs.get_mut(key)
-            && let Some(diff) = &state.diff
-            && !diff.hunks.is_empty()
-            && state.current_hunk > 0
-        {
-            state.current_hunk -= 1;
-            self.clear_manual_scroll();
-        }
-    }
-
     pub fn remove_file_diff(&mut self, key: &FileDiffKey) {
         self.file_diffs.remove(key);
         self.clear_manual_scroll();
-    }
-
-    pub fn focus(&self) -> NavigationFocus {
-        self.focus
-    }
-
-    pub fn set_focus(&mut self, focus: NavigationFocus) {
-        self.focus = focus;
-    }
-
-    pub fn reset_focus(&mut self) {
-        self.focus = NavigationFocus::File;
     }
 
     pub fn scroll_offset(&self) -> usize {
@@ -542,121 +453,426 @@ impl NavigationState {
         self.clear_manual_scroll();
     }
 
+    fn section_order() -> [StatusSection; 4] {
+        [
+            StatusSection::Conflicted,
+            StatusSection::Unstaged,
+            StatusSection::Untracked,
+            StatusSection::Staged,
+        ]
+    }
+
     fn build_sections(status: &RepositoryStatus) -> Vec<SectionInfo> {
         let mut sections = Vec::new();
-        let mut start_index = 0;
 
-        let section_configs = [
-            (StatusSection::Conflicted, status.conflicted_files().len()),
-            (StatusSection::Unstaged, status.unstaged_files().len()),
-            (StatusSection::Untracked, status.untracked_files().len()),
-            (StatusSection::Staged, status.staged_files().len()),
-        ];
-
-        for (section_type, count) in section_configs {
+        for section in Self::section_order() {
+            let count = Self::section_file_count_for_status(status, section);
             if count > 0 {
                 sections.push(SectionInfo {
-                    section_type,
-                    file_count: count,
-                    start_index,
+                    section_type: section,
                 });
-                start_index += count;
             }
         }
 
         sections
     }
 
-    fn get_current_section_info(&self) -> Option<&SectionInfo> {
-        self.sections
-            .iter()
-            .find(|s| s.section_type == self.current_section)
+    fn section_file_count_for_status(status: &RepositoryStatus, section: StatusSection) -> usize {
+        match section {
+            StatusSection::Staged => status.staged_files().len(),
+            StatusSection::Unstaged => status.unstaged_files().len(),
+            StatusSection::Untracked => status.untracked_files().len(),
+            StatusSection::Conflicted => status.conflicted_files().len(),
+        }
     }
 
-    fn find_previous_non_empty_section(&self) -> Option<StatusSection> {
-        let section_order = [
-            StatusSection::Conflicted,
-            StatusSection::Unstaged,
-            StatusSection::Untracked,
-            StatusSection::Staged,
-        ];
+    fn file_path(
+        &self,
+        status: &RepositoryStatus,
+        section: StatusSection,
+        file_index: usize,
+    ) -> Option<String> {
+        match section {
+            StatusSection::Staged => status
+                .staged_files()
+                .get(file_index)
+                .map(|f| f.path.clone()),
+            StatusSection::Unstaged => status
+                .unstaged_files()
+                .get(file_index)
+                .map(|f| f.path.clone()),
+            StatusSection::Untracked => status.untracked_files().get(file_index).cloned(),
+            StatusSection::Conflicted => status.conflicted_files().get(file_index).cloned(),
+        }
+    }
 
-        let current_pos = section_order
+    fn find_file_index(
+        &self,
+        status: &RepositoryStatus,
+        section: StatusSection,
+        path: &str,
+    ) -> Option<usize> {
+        match section {
+            StatusSection::Staged => status.staged_files().iter().position(|f| f.path == path),
+            StatusSection::Unstaged => status.unstaged_files().iter().position(|f| f.path == path),
+            StatusSection::Untracked => status.untracked_files().iter().position(|f| f == path),
+            StatusSection::Conflicted => status.conflicted_files().iter().position(|f| f == path),
+        }
+    }
+
+    fn next_non_empty_section(
+        &self,
+        status: &RepositoryStatus,
+        section: StatusSection,
+    ) -> Option<StatusSection> {
+        let order = Self::section_order();
+        let current_pos = order.iter().position(|s| *s == section)?;
+        order
             .iter()
-            .position(|&s| s == self.current_section)?;
+            .skip(current_pos + 1)
+            .copied()
+            .find(|s| Self::section_file_count_for_status(status, *s) > 0)
+    }
 
-        for i in (0..current_pos).rev() {
-            let section = section_order[i];
-            if self
-                .sections
+    fn previous_non_empty_section(
+        &self,
+        status: &RepositoryStatus,
+        section: StatusSection,
+    ) -> Option<StatusSection> {
+        let order = Self::section_order();
+        let current_pos = order.iter().position(|s| *s == section)?;
+        order
+            .iter()
+            .take(current_pos)
+            .copied()
+            .rfind(|s| Self::section_file_count_for_status(status, *s) > 0)
+    }
+
+    pub fn section_file_count(&self, status: &RepositoryStatus, section: StatusSection) -> usize {
+        Self::section_file_count_for_status(status, section)
+    }
+
+    pub fn hunk_count_for_file(
+        &self,
+        status: &RepositoryStatus,
+        section: StatusSection,
+        file_index: usize,
+    ) -> usize {
+        let Some(path) = self.file_path(status, section, file_index) else {
+            return 0;
+        };
+        let key = FileDiffKey::new(path, section.into());
+        if let Some(state) = self.file_diffs.get(&key) {
+            if !state.expanded {
+                return 0;
+            }
+            if let Some(diff) = &state.diff {
+                return diff.hunks.len();
+            }
+        }
+        0
+    }
+
+    fn first_file_cursor_from_sections(sections: &[SectionInfo]) -> Option<SelectionCursor> {
+        sections.first().map(|section| SelectionCursor::File {
+            section: section.section_type,
+            file_index: 0,
+        })
+    }
+
+    pub fn first_file_cursor(&self, status: &RepositoryStatus) -> Option<SelectionCursor> {
+        if self.sections.is_empty() {
+            return None;
+        }
+        Self::first_file_cursor_from_sections(&self.sections).or_else(|| {
+            Self::section_order()
                 .iter()
-                .any(|s| s.section_type == section && s.file_count > 0)
-            {
-                return Some(section);
-            }
-        }
-        None
+                .find(|s| Self::section_file_count_for_status(status, **s) > 0)
+                .map(|section| SelectionCursor::File {
+                    section: *section,
+                    file_index: 0,
+                })
+        })
     }
 
-    fn find_next_non_empty_section(&self) -> Option<StatusSection> {
-        let section_order = [
-            StatusSection::Conflicted,
-            StatusSection::Unstaged,
-            StatusSection::Untracked,
-            StatusSection::Staged,
-        ];
-
-        let current_pos = section_order
+    pub fn last_file_cursor(&self, status: &RepositoryStatus) -> Option<SelectionCursor> {
+        let section = Self::section_order()
             .iter()
-            .position(|&s| s == self.current_section)?;
+            .rev()
+            .copied()
+            .find(|s| Self::section_file_count_for_status(status, *s) > 0)?;
 
-        for section in section_order.iter().skip(current_pos + 1) {
-            let section = *section;
-            if self
-                .sections
-                .iter()
-                .any(|s| s.section_type == section && s.file_count > 0)
-            {
-                return Some(section);
-            }
-        }
-        None
+        let last_index = Self::section_file_count_for_status(status, section).saturating_sub(1);
+        Some(SelectionCursor::File {
+            section,
+            file_index: last_index,
+        })
     }
 
-    fn find_closest_position(&self, target_global_index: usize) -> Option<(StatusSection, usize)> {
-        for section in &self.sections {
-            let section_end = section.start_index + section.file_count;
-            if target_global_index >= section.start_index && target_global_index < section_end {
-                return Some((
-                    section.section_type,
-                    target_global_index - section.start_index,
-                ));
+    fn map_cursor_to_status(
+        &self,
+        status: &RepositoryStatus,
+        cursor: SelectionCursor,
+    ) -> Option<SelectionCursor> {
+        let (section, file_index) = match cursor {
+            SelectionCursor::File {
+                section,
+                file_index,
+            } => (section, file_index),
+            SelectionCursor::Hunk {
+                section,
+                file_index,
+                ..
+            } => (section, file_index),
+        };
+        let path = self.file_path(status, section, file_index)?;
+        let new_index = self.find_file_index(status, section, &path)?;
+
+        if let SelectionCursor::Hunk { hunk_index, .. } = cursor {
+            let hunk_count = self.hunk_count_for_file(status, section, new_index);
+            if hunk_count > 0 {
+                let clamped = hunk_index.min(hunk_count.saturating_sub(1));
+                return Some(SelectionCursor::Hunk {
+                    section,
+                    file_index: new_index,
+                    hunk_index: clamped,
+                });
             }
         }
 
-        if let Some(last_section) = self.sections.last()
-            && last_section.file_count > 0
-        {
-            return Some((last_section.section_type, last_section.file_count - 1));
-        }
-
-        None
+        Some(SelectionCursor::File {
+            section,
+            file_index: new_index,
+        })
     }
 
-    fn reset_to_first_available(&mut self) {
-        if let Some(first_section) = self.sections.first()
-            && first_section.file_count > 0
-        {
-            self.current_section = first_section.section_type;
-            self.selected_index = 0;
+    fn next_cursor(
+        &self,
+        status: &RepositoryStatus,
+        cursor: &SelectionCursor,
+    ) -> Option<SelectionCursor> {
+        match *cursor {
+            SelectionCursor::File {
+                section,
+                file_index,
+            } => {
+                if let Some(key) = self.file_diff_key_for(status, section, file_index)
+                    && self.is_file_diff_expanded(&key)
+                {
+                    let hunk_count = self.hunk_count_for_file(status, section, file_index);
+                    if hunk_count > 0 {
+                        return Some(SelectionCursor::Hunk {
+                            section,
+                            file_index,
+                            hunk_index: 0,
+                        });
+                    }
+                }
+                self.next_file_cursor(status, section, file_index)
+            }
+            SelectionCursor::Hunk {
+                section,
+                file_index,
+                hunk_index,
+            } => {
+                let hunk_count = self.hunk_count_for_file(status, section, file_index);
+                if hunk_index + 1 < hunk_count {
+                    return Some(SelectionCursor::Hunk {
+                        section,
+                        file_index,
+                        hunk_index: hunk_index + 1,
+                    });
+                }
+                self.next_file_cursor(status, section, file_index)
+            }
         }
+    }
+
+    fn next_file_cursor(
+        &self,
+        status: &RepositoryStatus,
+        section: StatusSection,
+        file_index: usize,
+    ) -> Option<SelectionCursor> {
+        let count = Self::section_file_count_for_status(status, section);
+        if file_index + 1 < count {
+            return Some(SelectionCursor::File {
+                section,
+                file_index: file_index + 1,
+            });
+        }
+
+        let next_section = self.next_non_empty_section(status, section)?;
+        Some(SelectionCursor::File {
+            section: next_section,
+            file_index: 0,
+        })
+    }
+
+    fn previous_cursor(
+        &self,
+        status: &RepositoryStatus,
+        cursor: &SelectionCursor,
+    ) -> Option<SelectionCursor> {
+        match *cursor {
+            SelectionCursor::File {
+                section,
+                file_index,
+            } => {
+                if file_index == 0 {
+                    let prev_section = self.previous_non_empty_section(status, section)?;
+                    let prev_count = Self::section_file_count_for_status(status, prev_section);
+                    if prev_count == 0 {
+                        return None;
+                    }
+                    let prev_index = prev_count.saturating_sub(1);
+                    if let Some(key) = self.file_diff_key_for(status, prev_section, prev_index)
+                        && self.is_file_diff_expanded(&key)
+                    {
+                        let prev_hunk_count =
+                            self.hunk_count_for_file(status, prev_section, prev_index);
+                        if prev_hunk_count > 0 {
+                            return Some(SelectionCursor::Hunk {
+                                section: prev_section,
+                                file_index: prev_index,
+                                hunk_index: prev_hunk_count.saturating_sub(1),
+                            });
+                        }
+                    }
+                    return Some(SelectionCursor::File {
+                        section: prev_section,
+                        file_index: prev_index,
+                    });
+                }
+
+                let prev_index = file_index - 1;
+                if let Some(key) = self.file_diff_key_for(status, section, prev_index)
+                    && self.is_file_diff_expanded(&key)
+                {
+                    let prev_hunk_count = self.hunk_count_for_file(status, section, prev_index);
+                    if prev_hunk_count > 0 {
+                        return Some(SelectionCursor::Hunk {
+                            section,
+                            file_index: prev_index,
+                            hunk_index: prev_hunk_count.saturating_sub(1),
+                        });
+                    }
+                }
+
+                Some(SelectionCursor::File {
+                    section,
+                    file_index: prev_index,
+                })
+            }
+            SelectionCursor::Hunk {
+                section,
+                file_index,
+                hunk_index,
+            } => {
+                if hunk_index > 0 {
+                    return Some(SelectionCursor::Hunk {
+                        section,
+                        file_index,
+                        hunk_index: hunk_index - 1,
+                    });
+                }
+
+                Some(SelectionCursor::File {
+                    section,
+                    file_index,
+                })
+            }
+        }
+    }
+
+    pub fn apply_cursor(&mut self, status: &RepositoryStatus, cursor: Option<SelectionCursor>) {
+        if let Some(SelectionCursor::Hunk {
+            section,
+            file_index,
+            hunk_index,
+        }) = cursor
+            && let Some(key) = self.file_diff_key_for(status, section, file_index)
+            && let Some(state) = self.file_diffs.get_mut(&key)
+        {
+            let max_index = state
+                .diff
+                .as_ref()
+                .map(|d| d.hunks.len().saturating_sub(1))
+                .unwrap_or(0);
+            state.current_hunk = hunk_index.min(max_index);
+        }
+
+        self.cursor = cursor;
+    }
+
+    pub fn ensure_cursor_valid(&mut self, status: &RepositoryStatus) {
+        let Some(cursor) = self.cursor else {
+            self.cursor = self.first_file_cursor(status);
+            return;
+        };
+
+        let (section, file_index) = match cursor {
+            SelectionCursor::File {
+                section,
+                file_index,
+            }
+            | SelectionCursor::Hunk {
+                section,
+                file_index,
+                ..
+            } => (section, file_index),
+        };
+
+        let file_exists = file_index < Self::section_file_count_for_status(status, section)
+            && self.file_path(status, section, file_index).is_some();
+        if !file_exists {
+            self.cursor = self.first_file_cursor(status);
+            return;
+        }
+
+        if let SelectionCursor::Hunk {
+            section,
+            file_index,
+            hunk_index,
+        } = cursor
+        {
+            let hunk_count = self.hunk_count_for_file(status, section, file_index);
+            if hunk_count == 0 {
+                self.cursor = Some(SelectionCursor::File {
+                    section,
+                    file_index,
+                });
+                return;
+            }
+
+            if hunk_index >= hunk_count {
+                self.cursor = Some(SelectionCursor::Hunk {
+                    section,
+                    file_index,
+                    hunk_index: hunk_count.saturating_sub(1),
+                });
+                return;
+            }
+        }
+
+        self.cursor = Some(cursor);
+    }
+
+    fn file_diff_key_for(
+        &self,
+        status: &RepositoryStatus,
+        section: StatusSection,
+        file_index: usize,
+    ) -> Option<FileDiffKey> {
+        let path = self.file_path(status, section, file_index)?;
+        Some(FileDiffKey::new(path, section.into()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff::{Diff, DiffContext};
+    use crate::diff::{Diff, DiffContext, DiffHunk, DiffLine, HunkHeader, LineRange, LineType};
     use crate::status::{FileEntry, FileStatus};
 
     fn create_file_entry(path: &str, status: FileStatus) -> FileEntry {
@@ -693,445 +909,184 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_navigation_empty_status() {
-        let status = RepositoryStatus::empty();
-        let nav = NavigationState::new(&status);
-
-        assert!(!nav.has_selections());
-        assert_eq!(nav.current_section(), StatusSection::Conflicted);
-        assert_eq!(nav.selected_index(), 0);
+    fn sample_hunk(label: &str) -> DiffHunk {
+        DiffHunk {
+            header: HunkHeader {
+                raw: format!("@@ {label} @@"),
+                old_start: 1,
+                old_lines: 1,
+                new_start: 1,
+                new_lines: 1,
+            },
+            lines: vec![DiffLine {
+                content: "line".into(),
+                line_type: LineType::Context,
+                old_line_no: Some(1),
+                new_line_no: Some(1),
+            }],
+            old_range: LineRange { start: 1, count: 1 },
+            new_range: LineRange { start: 1, count: 1 },
+            stageable: true,
+            context_lines: 0,
+        }
     }
 
     #[test]
-    fn test_navigation_single_section() {
+    fn initial_cursor_points_to_first_file() {
+        let status = create_test_status_with_files();
+        let nav = NavigationState::new(&status);
+
+        assert!(matches!(
+            nav.current_cursor(),
+            Some(SelectionCursor::File {
+                section: StatusSection::Conflicted,
+                file_index: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn move_next_traverses_hunks_then_files() {
         let status = create_single_section_status();
-        let nav = NavigationState::new(&status);
-
-        assert!(nav.has_selections());
-        assert_eq!(nav.current_section(), StatusSection::Unstaged);
-        assert_eq!(nav.selected_index(), 0);
-    }
-
-    #[test]
-    fn test_navigation_within_section() {
-        let status = create_single_section_status();
         let mut nav = NavigationState::new(&status);
-
-        // Start at first item
-        assert_eq!(nav.selected_index(), 0);
-
-        // Move down within section
-        nav.move_down();
-        assert_eq!(nav.selected_index(), 1);
-        assert_eq!(nav.current_section(), StatusSection::Unstaged);
-
-        // Move up within section
-        nav.move_up();
-        assert_eq!(nav.selected_index(), 0);
-        assert_eq!(nav.current_section(), StatusSection::Unstaged);
-    }
-
-    #[test]
-    fn test_navigation_between_sections() {
-        let status = create_test_status_with_files();
-        let mut nav = NavigationState::new(&status);
-
-        // Start in conflicted section (now first)
-        assert_eq!(nav.current_section(), StatusSection::Conflicted);
-        assert_eq!(nav.selected_index(), 0);
-
-        // Move to last item in conflicted section
-        nav.move_down();
-        assert_eq!(nav.selected_index(), 1);
-        assert_eq!(nav.current_section(), StatusSection::Conflicted);
-
-        // Move down from last item in conflicted should go to first item in unstaged
-        nav.move_down();
-        assert_eq!(nav.current_section(), StatusSection::Unstaged);
-        assert_eq!(nav.selected_index(), 0);
-
-        // Move up from first item in unstaged should go to last item in conflicted
-        nav.move_up();
-        assert_eq!(nav.current_section(), StatusSection::Conflicted);
-        assert_eq!(nav.selected_index(), 1);
-    }
-
-    #[test]
-    fn test_navigation_across_multiple_sections() {
-        let status = create_test_status_with_files();
-        let mut nav = NavigationState::new(&status);
-
-        // Navigate to the end of conflicted section (now first)
-        nav.move_down(); // conflicted[1]
-        assert_eq!(nav.current_section(), StatusSection::Conflicted);
-        assert_eq!(nav.selected_index(), 1);
-
-        // Move to unstaged section
-        nav.move_down(); // unstaged[0]
-        assert_eq!(nav.current_section(), StatusSection::Unstaged);
-        assert_eq!(nav.selected_index(), 0);
-
-        // Move to end of unstaged section
-        nav.move_down(); // unstaged[1]
-        nav.move_down(); // unstaged[2]
-        assert_eq!(nav.current_section(), StatusSection::Unstaged);
-        assert_eq!(nav.selected_index(), 2);
-
-        // Move to untracked section
-        nav.move_down();
-        assert_eq!(nav.current_section(), StatusSection::Untracked);
-        assert_eq!(nav.selected_index(), 0);
-
-        // Move to staged section
-        nav.move_down();
-        assert_eq!(nav.current_section(), StatusSection::Staged);
-        assert_eq!(nav.selected_index(), 0);
-
-        // Move to end of staged
-        nav.move_down();
-        assert_eq!(nav.current_section(), StatusSection::Staged);
-        assert_eq!(nav.selected_index(), 1);
-
-        // Try to move down from last item (should stay at last item)
-        nav.move_down();
-        assert_eq!(nav.current_section(), StatusSection::Staged);
-        assert_eq!(nav.selected_index(), 1);
-    }
-
-    #[test]
-    fn test_navigation_skip_empty_sections() {
-        let status = RepositoryStatus {
-            branch_name: "main".to_string(),
-            staged: vec![create_file_entry("staged1.txt", FileStatus::Added)],
-            unstaged: vec![], // Empty section
-            untracked: vec!["untracked1.txt".to_string()],
-            conflicted: vec![],
-        };
-        let mut nav = NavigationState::new(&status);
-
-        // Start in untracked (first non-empty section in new order: conflicted, unstaged are empty, untracked is first with files)
-        assert_eq!(nav.current_section(), StatusSection::Untracked);
-        assert_eq!(nav.selected_index(), 0);
-
-        // Move down should skip empty sections and go to staged
-        nav.move_down();
-        assert_eq!(nav.current_section(), StatusSection::Staged);
-        assert_eq!(nav.selected_index(), 0);
-
-        // Move up should skip empty sections and go back to untracked
-        nav.move_up();
-        assert_eq!(nav.current_section(), StatusSection::Untracked);
-        assert_eq!(nav.selected_index(), 0);
-    }
-
-    #[test]
-    fn test_move_to_top_and_bottom() {
-        let status = create_test_status_with_files();
-        let mut nav = NavigationState::new(&status);
-
-        // Move somewhere in the middle
-        nav.move_down();
-        nav.move_down();
-        nav.move_down();
-        nav.move_down();
-        assert_eq!(nav.current_section(), StatusSection::Unstaged);
-
-        // Move to top
-        nav.move_to_top();
-        assert_eq!(nav.current_section(), StatusSection::Conflicted);
-        assert_eq!(nav.selected_index(), 0);
-
-        // Move to bottom
-        nav.move_to_bottom();
-        assert_eq!(nav.current_section(), StatusSection::Staged);
-        assert_eq!(nav.selected_index(), 1); // Last item in staged section
-    }
-
-    #[test]
-    fn test_global_index_calculation() {
-        let status = create_test_status_with_files();
-        let mut nav = NavigationState::new(&status);
-
-        // unstaged[0] (now first)
-        assert_eq!(nav.get_global_index(), 0);
-
-        // unstaged[1]
-        nav.move_down();
-        assert_eq!(nav.get_global_index(), 1);
-
-        // unstaged[2]
-        nav.move_down();
-        assert_eq!(nav.get_global_index(), 2);
-
-        // staged[0]
-        nav.move_down();
-        assert_eq!(nav.get_global_index(), 3);
-
-        // staged[1]
-        nav.move_down();
-        assert_eq!(nav.get_global_index(), 4);
-
-        // untracked[0]
-        nav.move_down();
-        assert_eq!(nav.get_global_index(), 5);
-
-        // conflicted[0]
-        nav.move_down();
-        assert_eq!(nav.get_global_index(), 6);
-
-        // conflicted[1]
-        nav.move_down();
-        assert_eq!(nav.get_global_index(), 7);
-    }
-
-    #[test]
-    fn test_status_update_preserves_position() {
-        let initial_status = create_test_status_with_files();
-        let mut nav = NavigationState::new(&initial_status);
-
-        // Move to conflicted section index 1 (starts in conflicted[0])
-        nav.move_down();
-        assert_eq!(nav.current_section(), StatusSection::Conflicted);
-        assert_eq!(nav.selected_index(), 1);
-
-        // Update with same status should preserve position
-        nav.update_status(&initial_status);
-        assert_eq!(nav.current_section(), StatusSection::Conflicted);
-        assert_eq!(nav.selected_index(), 1);
-    }
-
-    #[test]
-    fn test_status_update_with_removed_files() {
-        let initial_status = create_test_status_with_files();
-        let mut nav = NavigationState::new(&initial_status);
-
-        // Move to the last unstaged file (conflicted is first, then unstaged)
-        nav.move_down(); // conflicted[1]
-        nav.move_down(); // unstaged[0]
-        nav.move_down(); // unstaged[1]
-        nav.move_down(); // unstaged[2]
-        assert_eq!(nav.current_section(), StatusSection::Unstaged);
-        assert_eq!(nav.selected_index(), 2);
-
-        // Create new status with fewer unstaged files
-        let updated_status = RepositoryStatus {
-            branch_name: "main".to_string(),
-            staged: vec![
-                create_file_entry("staged1.txt", FileStatus::Added),
-                create_file_entry("staged2.txt", FileStatus::Modified),
-            ],
-            unstaged: vec![create_file_entry("unstaged1.txt", FileStatus::Modified)], // Only one file now
-            untracked: vec!["untracked1.txt".to_string()],
-            conflicted: vec!["conflicted1.txt".to_string(), "conflicted2.txt".to_string()],
-        };
-
-        nav.update_status(&updated_status);
-        // When the exact position is not available, it should fallback to a reasonable position
-        // The global index 4 (unstaged[2] in old system) maps to conflicted section in new system
-        // This is expected behavior as the closest position algorithm works by global index
-        assert!(nav.has_selections());
-        // We don't assert the specific section since the closest position algorithm
-        // may place us in any valid section when the original position is no longer available
-    }
-
-    #[test]
-    fn test_get_selected_file() {
-        let status = create_test_status_with_files();
-        let mut nav = NavigationState::new(&status);
-
-        // Test selecting files from different sections (conflicted is now first)
-        let selected = nav.get_selected_file(&status).unwrap();
-        assert_eq!(selected.path, "conflicted1.txt");
-        assert!(matches!(selected.context, FileContext::Conflicted));
-
-        // Move to conflicted[1]
-        nav.move_down();
-        let selected = nav.get_selected_file(&status).unwrap();
-        assert_eq!(selected.path, "conflicted2.txt");
-        assert!(matches!(selected.context, FileContext::Conflicted));
-
-        // Move to unstaged[0]
-        nav.move_down();
-        let selected = nav.get_selected_file(&status).unwrap();
-        assert_eq!(selected.path, "unstaged1.txt");
-        assert!(matches!(selected.context, FileContext::Unstaged));
-
-        // Move to unstaged[1]
-        nav.move_down();
-        let selected = nav.get_selected_file(&status).unwrap();
-        assert_eq!(selected.path, "unstaged2.txt");
-        assert!(matches!(selected.context, FileContext::Unstaged));
-
-        // Move to unstaged[2]
-        nav.move_down();
-        let selected = nav.get_selected_file(&status).unwrap();
-        assert_eq!(selected.path, "unstaged3.txt");
-        assert!(matches!(selected.context, FileContext::Unstaged));
-
-        // Move to untracked[0]
-        nav.move_down();
-        let selected = nav.get_selected_file(&status).unwrap();
-        assert_eq!(selected.path, "untracked1.txt");
-        assert!(matches!(selected.context, FileContext::Untracked));
-
-        // Move to staged[0]
-        nav.move_down();
-        let selected = nav.get_selected_file(&status).unwrap();
-        assert_eq!(selected.path, "staged1.txt");
-        assert!(matches!(selected.context, FileContext::Staged));
-    }
-
-    #[test]
-    fn test_get_selected_file_empty_status() {
-        let status = RepositoryStatus::empty();
-        let nav = NavigationState::new(&status);
-
-        assert!(nav.get_selected_file(&status).is_none());
-    }
-
-    #[test]
-    fn test_get_operation_context() {
-        let status = create_test_status_with_files();
-        let mut nav = NavigationState::new(&status);
-
-        // Conflicted section -> read only (now first)
-        assert!(matches!(
-            nav.get_operation_context(),
-            OperationContext::ReadOnly
-        ));
-
-        // Move to unstaged section -> can stage
-        nav.move_down(); // conflicted[1]
-        nav.move_down(); // unstaged[0]
-        assert!(matches!(
-            nav.get_operation_context(),
-            OperationContext::CanStage
-        ));
-
-        // Move to untracked section -> can add
-        nav.move_down(); // unstaged[1]
-        nav.move_down(); // unstaged[2]
-        nav.move_down(); // untracked[0]
-        assert!(matches!(
-            nav.get_operation_context(),
-            OperationContext::CanAdd
-        ));
-
-        // Move to staged section -> can unstage
-        nav.move_down(); // staged[0]
-        assert!(matches!(
-            nav.get_operation_context(),
-            OperationContext::CanUnstage
-        ));
-    }
-
-    #[test]
-    fn test_status_update_maintains_section_when_possible() {
-        let initial_status = create_test_status_with_files();
-        let mut nav = NavigationState::new(&initial_status);
-
-        // Already at first conflicted file (now first section)
-        assert_eq!(nav.current_section(), StatusSection::Conflicted);
-        assert_eq!(nav.selected_index(), 0);
-
-        // Create new status that still has unstaged files, but fewer
-        let updated_status = RepositoryStatus {
-            branch_name: "main".to_string(),
-            staged: vec![
-                create_file_entry("staged1.txt", FileStatus::Added),
-                create_file_entry("staged2.txt", FileStatus::Modified),
-            ],
-            unstaged: vec![create_file_entry("unstaged1.txt", FileStatus::Modified)], // Same first file
-            untracked: vec!["untracked1.txt".to_string()],
-            conflicted: vec!["conflicted1.txt".to_string(), "conflicted2.txt".to_string()],
-        };
-
-        nav.update_status(&updated_status);
-        // Should maintain position in conflicted section since the file we were on still exists
-        assert_eq!(nav.current_section(), StatusSection::Conflicted);
-        assert_eq!(nav.selected_index(), 0);
-    }
-
-    #[test]
-    fn test_viewport_scroll_bounds() {
-        let status = create_test_status_with_files();
-        let nav = NavigationState::new(&status);
-
-        nav.update_viewport_metrics(3, 10, &[0]);
-        assert_eq!(nav.scroll_offset(), 0);
-
-        nav.scroll_viewport_down(2);
-        assert_eq!(nav.scroll_offset(), 2);
-
-        nav.scroll_viewport_down(10);
-        assert_eq!(nav.scroll_offset(), 7); // max offset = total (10) - height (3)
-
-        nav.scroll_viewport_up(1);
-        assert_eq!(nav.scroll_offset(), 6);
-
-        nav.scroll_viewport_up(10);
-        assert_eq!(nav.scroll_offset(), 0);
-    }
-
-    #[test]
-    fn test_ensure_targets_visible_aligns_with_margin() {
-        let status = create_test_status_with_files();
-        let nav = NavigationState::new(&status);
-
-        nav.update_viewport_metrics(5, 100, &[]);
-        nav.ensure_targets_visible(&[50]);
-        assert_eq!(nav.scroll_offset(), 49);
-
-        nav.ensure_targets_visible(&[2]);
-        assert_eq!(nav.scroll_offset(), 1);
-
-        nav.ensure_targets_visible(&[99]);
-        assert_eq!(nav.scroll_offset(), 95);
-
-        nav.update_viewport_metrics(1, 50, &[]);
-        nav.ensure_targets_visible(&[10]);
-        assert_eq!(nav.scroll_offset(), 10);
-    }
-
-    #[test]
-    fn test_manual_scroll_flag_lifecycle() {
-        let status = create_test_status_with_files();
-        let mut nav = NavigationState::new(&status);
-
-        nav.update_viewport_metrics(3, 10, &[]);
-        assert!(!nav.is_manual_scroll_active());
-
-        nav.scroll_viewport_down(2);
-        assert_eq!(nav.scroll_offset(), 2);
-        assert!(nav.is_manual_scroll_active());
-
-        // Rendering should not snap the viewport back while manual scroll is active
-        nav.update_viewport_metrics(3, 10, &[0]);
-        assert_eq!(nav.scroll_offset(), 2);
-
-        nav.move_down();
-        assert!(!nav.is_manual_scroll_active());
-
-        nav.update_viewport_metrics(3, 10, &[nav.get_global_index()]);
-        assert_eq!(nav.scroll_offset(), 0);
-    }
-
-    #[test]
-    fn test_has_cached_diff_for_respects_diff_context() {
-        let status = RepositoryStatus::empty();
-        let mut nav = NavigationState::new(&status);
-        let key = FileDiffKey::new("file.txt".to_string(), FileContext::Unstaged);
+        let diff_key = FileDiffKey::new(
+            status.unstaged_files()[0].path.clone(),
+            FileContext::Unstaged,
+        );
         let diff = Diff {
-            file_path: "file.txt".to_string(),
+            file_path: diff_key.path.clone(),
             context: DiffContext::WorkingTreeToIndex,
-            hunks: Vec::new(),
+            hunks: vec![sample_hunk("h1"), sample_hunk("h2")],
             binary: false,
         };
+        nav.set_file_diff(diff_key.clone(), diff, DiffContext::WorkingTreeToIndex);
 
-        nav.set_file_diff(key.clone(), diff, DiffContext::WorkingTreeToIndex);
+        nav.move_to_next(&status);
+        assert!(matches!(
+            nav.current_cursor(),
+            Some(SelectionCursor::Hunk {
+                section: StatusSection::Unstaged,
+                file_index: 0,
+                hunk_index: 0
+            })
+        ));
 
-        assert!(nav.has_cached_diff_for(&key, &DiffContext::WorkingTreeToIndex));
-        assert!(!nav.has_cached_diff_for(&key, &DiffContext::IndexToHead));
+        nav.move_to_next(&status);
+        assert!(matches!(
+            nav.current_cursor(),
+            Some(SelectionCursor::Hunk {
+                section: StatusSection::Unstaged,
+                file_index: 0,
+                hunk_index: 1
+            })
+        ));
+
+        nav.move_to_next(&status);
+        assert!(matches!(
+            nav.current_cursor(),
+            Some(SelectionCursor::File {
+                section: StatusSection::Unstaged,
+                file_index: 1
+            })
+        ));
+    }
+
+    #[test]
+    fn move_previous_steps_into_previous_file_hunk() {
+        let status = create_single_section_status();
+        let mut nav = NavigationState::new(&status);
+        let diff_key = FileDiffKey::new(
+            status.unstaged_files()[0].path.clone(),
+            FileContext::Unstaged,
+        );
+        let diff = Diff {
+            file_path: diff_key.path.clone(),
+            context: DiffContext::WorkingTreeToIndex,
+            hunks: vec![sample_hunk("h1"), sample_hunk("h2")],
+            binary: false,
+        };
+        nav.set_file_diff(diff_key.clone(), diff, DiffContext::WorkingTreeToIndex);
+
+        nav.move_to_bottom(&status);
+        assert!(matches!(
+            nav.current_cursor(),
+            Some(SelectionCursor::File {
+                section: StatusSection::Unstaged,
+                file_index: 1
+            })
+        ));
+
+        nav.move_to_previous(&status);
+        assert!(matches!(
+            nav.current_cursor(),
+            Some(SelectionCursor::Hunk {
+                section: StatusSection::Unstaged,
+                file_index: 0,
+                hunk_index: 1
+            })
+        ));
+
+        nav.move_to_previous(&status);
+        assert!(matches!(
+            nav.current_cursor(),
+            Some(SelectionCursor::Hunk {
+                section: StatusSection::Unstaged,
+                file_index: 0,
+                hunk_index: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn hunk_cursor_downgrades_when_diff_missing() {
+        let status = create_single_section_status();
+        let mut nav = NavigationState::new(&status);
+        let diff_key = FileDiffKey::new(
+            status.unstaged_files()[0].path.clone(),
+            FileContext::Unstaged,
+        );
+        nav.set_file_diff(
+            diff_key.clone(),
+            Diff {
+                file_path: diff_key.path.clone(),
+                context: DiffContext::WorkingTreeToIndex,
+                hunks: vec![sample_hunk("h1")],
+                binary: false,
+            },
+            DiffContext::WorkingTreeToIndex,
+        );
+        nav.apply_cursor(
+            &status,
+            Some(SelectionCursor::Hunk {
+                section: StatusSection::Unstaged,
+                file_index: 0,
+                hunk_index: 0,
+            }),
+        );
+        nav.clear_diff_cache();
+        nav.ensure_cursor_valid(&status);
+
+        assert!(matches!(
+            nav.current_cursor(),
+            Some(SelectionCursor::File {
+                section: StatusSection::Unstaged,
+                file_index: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn move_to_bottom_selects_last_file() {
+        let status = create_test_status_with_files();
+        let mut nav = NavigationState::new(&status);
+        nav.move_to_bottom(&status);
+
+        assert!(matches!(
+            nav.current_cursor(),
+            Some(SelectionCursor::File {
+                section: StatusSection::Staged,
+                file_index: 1
+            })
+        ));
     }
 }

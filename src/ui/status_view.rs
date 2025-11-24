@@ -1,6 +1,6 @@
 use crate::diff::{Diff, LineType};
 use crate::status::{FileEntry, RepositoryStatus};
-use crate::ui::navigation::{FileDiffKey, NavigationFocus, NavigationState, StatusSection};
+use crate::ui::navigation::{FileDiffKey, NavigationState, SelectionCursor, StatusSection};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Margin, Rect},
@@ -39,10 +39,6 @@ impl<'a> ListRenderContext<'a> {
         if self.track_visibility {
             self.scroll_targets.push(index);
         }
-    }
-
-    fn should_track_visibility(&self) -> bool {
-        self.track_visibility
     }
 }
 
@@ -99,6 +95,7 @@ impl<'a> StatusView<'a> {
         let mut selected_list_index = None;
         let mut scroll_targets: Vec<usize> = Vec::new();
         let track_visibility = !self.navigation.is_manual_scroll_active();
+        let cursor = self.navigation.current_cursor();
         let mut render_ctx = ListRenderContext::new(
             &mut selected_list_index,
             &mut scroll_targets,
@@ -111,6 +108,7 @@ impl<'a> StatusView<'a> {
             StatusSection::Conflicted,
             "Conflicted files",
             self.status.conflicted_files(),
+            cursor,
         );
 
         self.add_section_items_with_entries(
@@ -119,6 +117,7 @@ impl<'a> StatusView<'a> {
             StatusSection::Unstaged,
             "Unstaged changes",
             self.status.unstaged_files(),
+            cursor,
         );
 
         self.add_section_items(
@@ -127,6 +126,7 @@ impl<'a> StatusView<'a> {
             StatusSection::Untracked,
             "Untracked files",
             self.status.untracked_files(),
+            cursor,
         );
 
         self.add_section_items_with_entries(
@@ -135,6 +135,7 @@ impl<'a> StatusView<'a> {
             StatusSection::Staged,
             "Staged changes",
             self.status.staged_files(),
+            cursor,
         );
 
         let viewport_height = area.height as usize;
@@ -158,6 +159,7 @@ impl<'a> StatusView<'a> {
         section: StatusSection,
         header: &str,
         entries: &[FileEntry],
+        cursor: Option<SelectionCursor>,
     ) {
         if entries.is_empty() {
             return;
@@ -174,31 +176,20 @@ impl<'a> StatusView<'a> {
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD);
 
-        let header_index = items.len();
         items.push(ListItem::new(Line::from(Span::styled(
             section_header,
             header_style,
         ))));
 
-        if render_ctx.should_track_visibility()
-            && self.navigation.current_section() == section
-            && self.navigation.selected_index() == 0
-        {
-            render_ctx.ensure_visible(header_index);
-        }
-
         // Only show files if section is not collapsed
         if !is_collapsed {
             for (file_index, entry) in entries.iter().enumerate() {
-                let is_selected = self.navigation.current_section() == section
-                    && self.navigation.selected_index() == file_index;
+                let is_selected = matches!(cursor, Some(SelectionCursor::File { section: s, file_index: idx }) if s == section && idx == file_index);
 
                 // Track the list index of the selected item
                 if is_selected {
                     let index = items.len();
-                    if self.navigation.focus() == NavigationFocus::File {
-                        render_ctx.select_index(index);
-                    }
+                    render_ctx.select_index(index);
                     render_ctx.ensure_visible(index);
                 }
 
@@ -235,10 +226,7 @@ impl<'a> StatusView<'a> {
                 {
                     if let Some(diff) = &diff_state.diff {
                         self.add_inline_diff_items_with_selection(
-                            items,
-                            diff,
-                            diff_state.current_hunk,
-                            render_ctx,
+                            items, diff, render_ctx, section, file_index, cursor,
                         );
                     } else {
                         // Show loading placeholder
@@ -263,6 +251,7 @@ impl<'a> StatusView<'a> {
         section: StatusSection,
         header: &str,
         files: &[String],
+        cursor: Option<SelectionCursor>,
     ) {
         if files.is_empty() {
             return;
@@ -279,18 +268,10 @@ impl<'a> StatusView<'a> {
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD);
 
-        let header_index = items.len();
         items.push(ListItem::new(Line::from(Span::styled(
             section_header,
             header_style,
         ))));
-
-        if render_ctx.should_track_visibility()
-            && self.navigation.current_section() == section
-            && self.navigation.selected_index() == 0
-        {
-            render_ctx.ensure_visible(header_index);
-        }
 
         // Only show files if section is not collapsed
         if !is_collapsed {
@@ -302,15 +283,12 @@ impl<'a> StatusView<'a> {
                         .and_then(|n| n.to_str())
                         .unwrap_or(file),
                 };
-                let is_selected = self.navigation.current_section() == section
-                    && self.navigation.selected_index() == file_index;
+                let is_selected = matches!(cursor, Some(SelectionCursor::File { section: s, file_index: idx }) if s == section && idx == file_index);
 
                 // Track the list index of the selected item
                 if is_selected {
                     let index = items.len();
-                    if self.navigation.focus() == NavigationFocus::File {
-                        render_ctx.select_index(index);
-                    }
+                    render_ctx.select_index(index);
                     render_ctx.ensure_visible(index);
                 }
 
@@ -348,10 +326,7 @@ impl<'a> StatusView<'a> {
                 {
                     if let Some(diff) = &diff_state.diff {
                         self.add_inline_diff_items_with_selection(
-                            items,
-                            diff,
-                            diff_state.current_hunk,
-                            render_ctx,
+                            items, diff, render_ctx, section, file_index, cursor,
                         );
                     } else {
                         // Show loading placeholder
@@ -391,10 +366,11 @@ impl<'a> StatusView<'a> {
         &self,
         items: &mut Vec<ListItem>,
         diff: &Diff,
-        selected_hunk: usize,
         render_ctx: &mut ListRenderContext,
+        section: StatusSection,
+        file_index: usize,
+        cursor: Option<SelectionCursor>,
     ) {
-        let diff_focused = self.navigation.focus() == NavigationFocus::InlineDiff;
         // Check for binary files
         if diff.binary {
             items.push(ListItem::new(Line::from(Span::styled(
@@ -409,13 +385,14 @@ impl<'a> StatusView<'a> {
         for (idx, hunk) in diff.hunks.iter().enumerate() {
             // Hunk header with indentation and selection highlight
             let header_index = items.len();
-            let header_style = if diff_focused && idx == selected_hunk {
+            let is_selected = matches!(cursor, Some(SelectionCursor::Hunk { section: s, file_index: fi, hunk_index: hi }) if s == section && fi == file_index && hi == idx);
+            let header_style = if is_selected {
                 Style::default().fg(Color::Cyan).bg(Color::DarkGray)
             } else {
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM)
             };
 
-            if diff_focused && idx == selected_hunk {
+            if is_selected {
                 render_ctx.ensure_visible(header_index);
                 render_ctx.select_index(header_index);
             }
