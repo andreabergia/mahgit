@@ -145,7 +145,11 @@ impl<'a> StatusView<'a> {
         let list = List::new(items);
 
         let mut list_state = ratatui::widgets::ListState::default();
-        list_state.select(selected_list_index);
+        // When manual scrolling is active, don't set selection to prevent
+        // the List widget from auto-scrolling to keep the selected item visible
+        if !self.navigation.is_manual_scroll_active() {
+            list_state.select(selected_list_index);
+        }
         *list_state.offset_mut() = self.navigation.scroll_offset();
 
         f.render_widget(Clear, area);

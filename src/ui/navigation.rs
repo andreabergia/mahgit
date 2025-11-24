@@ -367,9 +367,8 @@ impl NavigationState {
         if lines == 0 {
             return;
         }
-        let max_offset = self.max_scroll_offset.get();
         let current = self.scroll_offset.get();
-        let new_offset = current.saturating_add(lines).min(max_offset);
+        let new_offset = current.saturating_add(lines);
         self.scroll_offset.set(new_offset);
         self.manual_scroll_active.set(true);
     }
@@ -1088,5 +1087,107 @@ mod tests {
                 file_index: 1
             })
         ));
+    }
+
+    #[test]
+    fn page_scroll_down_increases_offset() {
+        let status = create_single_section_status();
+        let nav = NavigationState::new(&status);
+
+        // Simulate viewport metrics
+        nav.update_viewport_metrics(20, 100, &[]);
+
+        // Initial offset should be 0
+        assert_eq!(nav.scroll_offset(), 0);
+
+        // Scroll down by one page (20 lines)
+        nav.scroll_viewport_down(20);
+
+        // Offset should increase
+        assert_eq!(nav.scroll_offset(), 20);
+        assert!(nav.is_manual_scroll_active());
+    }
+
+    #[test]
+    fn page_scroll_down_continues_past_max_offset() {
+        let status = create_single_section_status();
+        let nav = NavigationState::new(&status);
+
+        // Simulate viewport with 20 lines height and 50 total items
+        // This means max_offset = 50 - 20 = 30
+        nav.update_viewport_metrics(20, 50, &[]);
+
+        // Scroll to near max_offset
+        nav.scroll_viewport_down(25);
+        assert_eq!(nav.scroll_offset(), 25);
+
+        // Scroll again - should go to 45, which exceeds old max_offset of 30
+        // but will be clamped to 30 by update_viewport_metrics
+        nav.scroll_viewport_down(20);
+        assert_eq!(nav.scroll_offset(), 45);
+
+        // When update_viewport_metrics is called again, it should clamp to max_offset
+        nav.update_viewport_metrics(20, 50, &[]);
+        assert_eq!(nav.scroll_offset(), 30);
+        assert!(nav.is_manual_scroll_active());
+    }
+
+    #[test]
+    fn multiple_page_downs_then_page_ups() {
+        let status = create_single_section_status();
+        let nav = NavigationState::new(&status);
+
+        nav.update_viewport_metrics(20, 100, &[]);
+
+        // Press page down twice
+        nav.scroll_viewport_down(20);
+        nav.scroll_viewport_down(20);
+        assert_eq!(nav.scroll_offset(), 40);
+
+        // Press page up twice - should return to 0
+        nav.scroll_viewport_up(20);
+        assert_eq!(nav.scroll_offset(), 20);
+        nav.scroll_viewport_up(20);
+        assert_eq!(nav.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn manual_scroll_persists_across_page_scrolls() {
+        let status = create_single_section_status();
+        let nav = NavigationState::new(&status);
+
+        nav.update_viewport_metrics(20, 100, &[]);
+
+        assert!(!nav.is_manual_scroll_active());
+
+        nav.scroll_viewport_down(20);
+        assert!(nav.is_manual_scroll_active());
+
+        nav.scroll_viewport_down(20);
+        assert!(nav.is_manual_scroll_active());
+
+        nav.scroll_viewport_up(10);
+        assert!(nav.is_manual_scroll_active());
+    }
+
+    #[test]
+    fn scroll_viewport_down_without_clamping() {
+        let status = create_single_section_status();
+        let nav = NavigationState::new(&status);
+
+        // Set up viewport with max_offset = 30
+        nav.update_viewport_metrics(20, 50, &[]);
+
+        // Scroll to exactly max_offset
+        nav.scroll_viewport_down(30);
+        assert_eq!(nav.scroll_offset(), 30);
+
+        // Scroll again - should increase offset even though it exceeds max_offset
+        // (it will be clamped by update_viewport_metrics later)
+        nav.scroll_viewport_down(20);
+        assert_eq!(nav.scroll_offset(), 50);
+
+        // This demonstrates that scroll_viewport_down doesn't clamp,
+        // allowing continuous scrolling
     }
 }
