@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
 const ICON_COLLAPSED: &str = "▸";
@@ -152,7 +152,6 @@ impl<'a> StatusView<'a> {
         }
         *list_state.offset_mut() = self.navigation.scroll_offset();
 
-        f.render_widget(Clear, area);
         f.render_stateful_widget(list, area, &mut list_state);
     }
 

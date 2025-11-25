@@ -108,5 +108,4 @@ mod tests {
         // Cleanup
         std::fs::remove_dir_all(&temp_dir).ok();
     }
-
 }
