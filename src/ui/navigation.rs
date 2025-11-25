@@ -66,6 +66,9 @@ pub struct InlineDiffState {
     pub diff: Option<Diff>,
     pub expanded: bool,
     pub current_hunk: usize,
+    /// Tracks which hunks are collapsed (true = collapsed, false = expanded)
+    /// Hunks are expanded by default
+    pub collapsed_hunks: std::collections::HashSet<usize>,
 }
 
 pub struct NavigationState {
@@ -299,6 +302,7 @@ impl NavigationState {
                     diff: None,
                     expanded: true,
                     current_hunk: 0,
+                    collapsed_hunks: std::collections::HashSet::new(),
                 },
             );
         }
@@ -320,6 +324,7 @@ impl NavigationState {
                 diff: Some(diff),
                 expanded: true,
                 current_hunk: 0,
+                collapsed_hunks: std::collections::HashSet::new(),
             },
         );
         self.clear_manual_scroll();
@@ -334,6 +339,24 @@ impl NavigationState {
             state.current_hunk = 0;
             self.clear_manual_scroll();
         }
+    }
+
+    pub fn toggle_hunk_collapsed(&mut self, key: &FileDiffKey, hunk_index: usize) {
+        if let Some(state) = self.file_diffs.get_mut(key) {
+            if state.collapsed_hunks.contains(&hunk_index) {
+                state.collapsed_hunks.remove(&hunk_index);
+            } else {
+                state.collapsed_hunks.insert(hunk_index);
+            }
+            self.clear_manual_scroll();
+        }
+    }
+
+    pub fn is_hunk_collapsed(&self, key: &FileDiffKey, hunk_index: usize) -> bool {
+        self.file_diffs
+            .get(key)
+            .map(|state| state.collapsed_hunks.contains(&hunk_index))
+            .unwrap_or(false)
     }
 
     pub fn remove_file_diff(&mut self, key: &FileDiffKey) {

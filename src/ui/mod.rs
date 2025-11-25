@@ -288,7 +288,24 @@ impl App {
     }
 
     fn toggle_accordion(&mut self) {
-        self.toggle_inline_diff();
+        // Context-aware toggle:
+        // - When on a file cursor, toggle the entire file diff
+        // - When on a hunk cursor, toggle that specific hunk
+        if let Some(cursor) = self.navigation.current_cursor() {
+            match cursor {
+                SelectionCursor::File { .. } => {
+                    self.toggle_inline_diff();
+                }
+                SelectionCursor::Hunk { hunk_index, .. } => {
+                    // Toggle the specific hunk
+                    if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+                        let diff_key =
+                            FileDiffKey::new(selected_file.path.clone(), selected_file.context);
+                        self.navigation.toggle_hunk_collapsed(&diff_key, hunk_index);
+                    }
+                }
+            }
+        }
     }
 
     fn toggle_inline_diff(&mut self) {

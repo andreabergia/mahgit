@@ -387,6 +387,18 @@ impl<'a> StatusView<'a> {
         }
 
         for (idx, hunk) in diff.hunks.iter().enumerate() {
+            // Check if this hunk is collapsed
+            let key = crate::ui::navigation::FileDiffKey::new(
+                diff.file_path.clone(),
+                match section {
+                    StatusSection::Staged => crate::ui::navigation::FileContext::Staged,
+                    StatusSection::Unstaged => crate::ui::navigation::FileContext::Unstaged,
+                    StatusSection::Untracked => crate::ui::navigation::FileContext::Untracked,
+                    StatusSection::Conflicted => crate::ui::navigation::FileContext::Conflicted,
+                },
+            );
+            let is_collapsed = self.navigation.is_hunk_collapsed(&key, idx);
+
             // Hunk header with indentation and selection highlight
             let header_index = items.len();
             let is_selected = matches!(cursor, Some(SelectionCursor::Hunk { section: s, file_index: fi, hunk_index: hi }) if s == section && fi == file_index && hi == idx);
@@ -401,24 +413,29 @@ impl<'a> StatusView<'a> {
                 render_ctx.select_index(header_index);
             }
 
+            // Add collapse indicator (▼ for expanded, ▶ for collapsed)
+            let collapse_indicator = if is_collapsed { "▶" } else { "▼" };
             items.push(ListItem::new(Line::from(Span::styled(
-                format!("    {}", hunk.header.raw),
+                format!("    {} {}", collapse_indicator, hunk.header.raw),
                 header_style,
             ))));
 
-            // Diff lines with deeper indentation
-            for line in &hunk.lines {
-                let (prefix, color) = match line.line_type {
-                    LineType::Addition => ("+", Color::Green),
-                    LineType::Deletion => ("-", Color::Red),
-                    LineType::Context => (" ", Color::White),
-                    LineType::NoNewlineEOF => ("\\", Color::Yellow),
-                };
+            // Only show diff lines if not collapsed
+            if !is_collapsed {
+                // Diff lines with deeper indentation
+                for line in &hunk.lines {
+                    let (prefix, color) = match line.line_type {
+                        LineType::Addition => ("+", Color::Green),
+                        LineType::Deletion => ("-", Color::Red),
+                        LineType::Context => (" ", Color::White),
+                        LineType::NoNewlineEOF => ("\\", Color::Yellow),
+                    };
 
-                items.push(ListItem::new(Line::from(Span::styled(
-                    format!("      {}{}", prefix, line.content),
-                    Style::default().fg(color),
-                ))));
+                    items.push(ListItem::new(Line::from(Span::styled(
+                        format!("      {}{}", prefix, line.content),
+                        Style::default().fg(color),
+                    ))));
+                }
             }
 
             if diff.hunks.len() > 1 {
