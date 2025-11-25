@@ -405,8 +405,12 @@ impl<'a> StatusView<'a> {
                 render_ctx.select_index(header_index);
             }
 
-            // Add collapse indicator (▼ for expanded, ▶ for collapsed)
-            let collapse_indicator = if is_collapsed { "▶" } else { "▼" };
+            // Add collapse indicator
+            let collapse_indicator = if is_collapsed {
+                ICON_COLLAPSED
+            } else {
+                ICON_EXPANDED
+            };
             items.push(ListItem::new(Line::from(Span::styled(
                 format!("    {} {}", collapse_indicator, hunk.header.raw),
                 header_style,
