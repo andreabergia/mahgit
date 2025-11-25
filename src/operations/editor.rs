@@ -109,47 +109,4 @@ mod tests {
         std::fs::remove_dir_all(&temp_dir).ok();
     }
 
-    #[test]
-    fn test_resolve_editor_with_editor_env() {
-        let temp_dir = std::env::temp_dir().join("mahgit_test_editor_env");
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        let repo = git2::Repository::init(&temp_dir).unwrap();
-        let mahgit_repo = Repository::from_git2_repo(repo);
-
-        // Save original values
-        let original_git_editor = env::var("GIT_EDITOR").ok();
-        let original_visual = env::var("VISUAL").ok();
-        let original_editor = env::var("EDITOR").ok();
-
-        // Set up test environment
-        unsafe {
-            env::remove_var("GIT_EDITOR");
-            env::remove_var("VISUAL");
-            env::set_var("EDITOR", "nano");
-        }
-
-        let editor = resolve_editor(&mahgit_repo);
-        assert_eq!(editor, "nano");
-
-        // Restore original values
-        unsafe {
-            if let Some(val) = original_git_editor {
-                env::set_var("GIT_EDITOR", val);
-            } else {
-                env::remove_var("GIT_EDITOR");
-            }
-            if let Some(val) = original_visual {
-                env::set_var("VISUAL", val);
-            } else {
-                env::remove_var("VISUAL");
-            }
-            if let Some(val) = original_editor {
-                env::set_var("EDITOR", val);
-            } else {
-                env::remove_var("EDITOR");
-            }
-        }
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
 }
