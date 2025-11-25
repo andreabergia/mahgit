@@ -388,15 +388,7 @@ impl<'a> StatusView<'a> {
 
         for (idx, hunk) in diff.hunks.iter().enumerate() {
             // Check if this hunk is collapsed
-            let key = crate::ui::navigation::FileDiffKey::new(
-                diff.file_path.clone(),
-                match section {
-                    StatusSection::Staged => crate::ui::navigation::FileContext::Staged,
-                    StatusSection::Unstaged => crate::ui::navigation::FileContext::Unstaged,
-                    StatusSection::Untracked => crate::ui::navigation::FileContext::Untracked,
-                    StatusSection::Conflicted => crate::ui::navigation::FileContext::Conflicted,
-                },
-            );
+            let key = FileDiffKey::new(diff.file_path.clone(), section.into());
             let is_collapsed = self.navigation.is_hunk_collapsed(&key, idx);
 
             // Hunk header with indentation and selection highlight
