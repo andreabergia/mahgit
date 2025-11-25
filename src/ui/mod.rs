@@ -31,6 +31,7 @@ pub struct App {
     input_handler: InputHandler,
     feedback_manager: FeedbackManager,
     show_help: bool,
+    pending_editor_file: Option<String>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -59,6 +60,7 @@ impl App {
             input_handler: InputHandler::new(),
             feedback_manager: FeedbackManager::new(),
             show_help: false,
+            pending_editor_file: None,
         }
     }
 
@@ -126,6 +128,54 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         loop {
+            // Handle pending editor file if set
+            if let Some(file_path) = self.pending_editor_file.take() {
+                // Suspend terminal before opening editor
+                if let Err(e) = self.suspend_terminal() {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(format!(
+                            "Failed to suspend terminal: {}",
+                            e
+                        )));
+                } else {
+                    // Open the file in the editor
+                    let editor_result = editor::open_file_in_editor(&self.repository, &file_path);
+
+                    // Restore terminal after editor exits
+                    if let Err(e) = self.resume_terminal() {
+                        eprintln!("Failed to resume terminal: {}", e);
+                        std::process::exit(1);
+                    }
+
+                    // Clear the terminal to ensure clean state
+                    terminal.clear()?;
+
+                    // Handle the editor result
+                    match editor_result {
+                        Ok(success) => {
+                            if success {
+                                // Refresh status after editing in case the file was modified
+                                self.refresh_status();
+                            } else {
+                                self.feedback_manager.show_result(
+                                    crate::operations::OperationResult::new(
+                                        "Editor exited with error".to_string(),
+                                    ),
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            self.feedback_manager.show_result(
+                                crate::operations::OperationResult::new(format!(
+                                    "Failed to open editor: {}",
+                                    err
+                                )),
+                            );
+                        }
+                    }
+                }
+            }
+
             terminal.draw(|f| self.render(f))?;
 
             if event::poll(std::time::Duration::from_millis(16))? {
@@ -675,46 +725,9 @@ impl App {
                 }
             };
 
-            // Suspend terminal before opening editor
-            if let Err(e) = self.suspend_terminal() {
-                self.feedback_manager
-                    .show_result(crate::operations::OperationResult::new(format!(
-                        "Failed to suspend terminal: {}",
-                        e
-                    )));
-                return;
-            }
-
-            // Open the file in the editor
-            let editor_result = editor::open_file_in_editor(&self.repository, file_path_str);
-
-            // Restore terminal after editor exits
-            if let Err(e) = self.resume_terminal() {
-                eprintln!("Failed to resume terminal: {}", e);
-                std::process::exit(1);
-            }
-
-            // Handle the editor result
-            match editor_result {
-                Ok(success) => {
-                    if success {
-                        // Refresh status after editing in case the file was modified
-                        self.refresh_status();
-                    } else {
-                        self.feedback_manager
-                            .show_result(crate::operations::OperationResult::new(
-                                "Editor exited with error".to_string(),
-                            ));
-                    }
-                }
-                Err(err) => {
-                    self.feedback_manager
-                        .show_result(crate::operations::OperationResult::new(format!(
-                            "Failed to open editor: {}",
-                            err
-                        )));
-                }
-            }
+            // Set the pending editor file to be handled in the event loop
+            // This ensures we have access to the terminal for proper cleanup
+            self.pending_editor_file = Some(file_path_str.to_string());
         }
     }
 
