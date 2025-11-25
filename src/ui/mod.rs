@@ -197,6 +197,8 @@ impl App {
             Command::JumpToPreviousHunk => self.jump_within_parent(VerticalDirection::Up),
             Command::JumpToNextHunk => self.jump_within_parent(VerticalDirection::Down),
             Command::PageForward => self.scroll_full_page(VerticalDirection::Down),
+            Command::MoveUpHierarchy => self.move_up_hierarchy(),
+            Command::MoveDownHierarchy => self.move_down_hierarchy(),
             Command::GoToTopOfDiff => {
                 // TODO: Implement inline diff navigation
             }
@@ -726,6 +728,98 @@ impl App {
         execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
         enable_raw_mode()?;
         Ok(())
+    }
+
+    fn move_up_hierarchy(&mut self) {
+        // Left key: Move up in hierarchy
+        // - If on a hunk cursor, move to the file cursor
+        // - If on a file cursor with expanded diff, collapse it
+        if let Some(cursor) = self.navigation.current_cursor() {
+            match cursor {
+                SelectionCursor::Hunk {
+                    section,
+                    file_index,
+                    ..
+                } => {
+                    // Move from hunk to file
+                    let new_cursor = SelectionCursor::File {
+                        section,
+                        file_index,
+                    };
+                    self.navigation.apply_cursor(&self.status, Some(new_cursor));
+                    self.navigation.clear_manual_scroll();
+                }
+                SelectionCursor::File { .. } => {
+                    // If file has expanded diff, collapse it
+                    if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+                        let diff_key =
+                            FileDiffKey::new(selected_file.path.clone(), selected_file.context);
+                        if self.navigation.is_file_diff_expanded(&diff_key) {
+                            self.toggle_inline_diff();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn move_down_hierarchy(&mut self) {
+        // Right key: Move down in hierarchy
+        // - If on a file cursor with closed diff, expand it and move to first hunk
+        // - If on a file cursor with expanded diff, move to first hunk
+        // - If on a hunk cursor, stay at hunk (no-op)
+        if let Some(cursor) = self.navigation.current_cursor() {
+            match cursor {
+                SelectionCursor::File {
+                    section,
+                    file_index,
+                } => {
+                    if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+                        let diff_key =
+                            FileDiffKey::new(selected_file.path.clone(), selected_file.context);
+
+                        if self.navigation.is_file_diff_expanded(&diff_key) {
+                            // Diff is already expanded, move to first hunk
+                            let hunk_count = self.navigation.hunk_count_for_file(
+                                &self.status,
+                                section,
+                                file_index,
+                            );
+                            if hunk_count > 0 {
+                                let new_cursor = SelectionCursor::Hunk {
+                                    section,
+                                    file_index,
+                                    hunk_index: 0,
+                                };
+                                self.navigation.apply_cursor(&self.status, Some(new_cursor));
+                                self.navigation.clear_manual_scroll();
+                            }
+                        } else {
+                            // Diff is closed, expand it and move to first hunk
+                            self.toggle_inline_diff();
+                            // After expanding, move to first hunk if available
+                            let hunk_count = self.navigation.hunk_count_for_file(
+                                &self.status,
+                                section,
+                                file_index,
+                            );
+                            if hunk_count > 0 {
+                                let new_cursor = SelectionCursor::Hunk {
+                                    section,
+                                    file_index,
+                                    hunk_index: 0,
+                                };
+                                self.navigation.apply_cursor(&self.status, Some(new_cursor));
+                                self.navigation.clear_manual_scroll();
+                            }
+                        }
+                    }
+                }
+                SelectionCursor::Hunk { .. } => {
+                    // Already at hunk level, do nothing (no-op)
+                }
+            }
+        }
     }
 
     // TODO: Implement inline hunk staging methods

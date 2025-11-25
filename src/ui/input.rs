@@ -42,6 +42,10 @@ pub enum Command {
     GoToTopOfDiff,
     GoToBottomOfDiff,
 
+    // Hierarchy navigation commands
+    MoveUpHierarchy,   // Left: hunk -> file, file stays at file
+    MoveDownHierarchy, // Right: file -> first hunk (if expanded), hunk stays at hunk
+
     // Help
     ShowHelp,
 
@@ -90,7 +94,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::PreviousHunk
+                Command::MoveUpHierarchy
             }
 
             KeyEvent {
@@ -98,7 +102,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::NextHunk
+                Command::MoveDownHierarchy
             }
 
             KeyEvent {
@@ -261,7 +265,8 @@ impl InputHandler {
             "Navigation:",
             "  ↓/j     Move selection down",
             "  ↑/k     Move selection up",
-            "  ←/→     Scroll half page up/down",
+            "  ←       Move up hierarchy (hunk → file, collapse diff)",
+            "  →       Move down hierarchy (expand/enter diff)",
             "  PgUp/b  Scroll up a page",
             "  PgDn/f  Scroll down a page",
             "  Space   Page forward",
@@ -503,7 +508,7 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(left_arrow), Command::PreviousHunk);
+        assert_eq!(handler.handle_key(left_arrow), Command::MoveUpHierarchy);
 
         let right_arrow = KeyEvent {
             code: KeyCode::Right,
@@ -511,7 +516,7 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(right_arrow), Command::NextHunk);
+        assert_eq!(handler.handle_key(right_arrow), Command::MoveDownHierarchy);
     }
 
     #[test]
