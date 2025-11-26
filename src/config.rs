@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
     pub theme: String,
@@ -52,5 +52,119 @@ impl Config {
             .map_err(|e| ConfigError::ParseError(config_path.clone(), e))?;
 
         Ok(config)
+    }
+
+    /// Expands tabs in a string to spaces based on the configured tab_width.
+    /// Tracks column position to expand tabs to the next multiple of tab_width.
+    pub fn expand_tabs(&self, line: &str) -> String {
+        expand_tabs_with_width(line, self.tab_width)
+    }
+}
+
+/// Expands tabs in a string to spaces based on the given tab_width.
+/// Tracks column position to expand tabs to the next multiple of tab_width.
+pub fn expand_tabs_with_width(line: &str, tab_width: usize) -> String {
+    let mut result = String::with_capacity(line.len());
+    let mut col = 0;
+
+    for ch in line.chars() {
+        if ch == '\t' {
+            let spaces = tab_width - (col % tab_width);
+            result.extend(std::iter::repeat_n(' ', spaces));
+            col += spaces;
+        } else {
+            result.push(ch);
+            col += 1;
+        }
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_tabs_no_tabs() {
+        assert_eq!(expand_tabs_with_width("hello world", 4), "hello world");
+        assert_eq!(expand_tabs_with_width("no tabs here", 8), "no tabs here");
+    }
+
+    #[test]
+    fn test_expand_tabs_single_tab_at_start() {
+        // Tab at position 0 should expand to 4 spaces (tab_width=4)
+        assert_eq!(expand_tabs_with_width("\thello", 4), "    hello");
+        // Tab at position 0 should expand to 8 spaces (tab_width=8)
+        assert_eq!(expand_tabs_with_width("\thello", 8), "        hello");
+    }
+
+    #[test]
+    fn test_expand_tabs_single_tab_at_middle() {
+        // "a" is at col 0, tab at col 1 should expand to 3 spaces (next multiple of 4 is 4)
+        assert_eq!(expand_tabs_with_width("a\tb", 4), "a   b");
+        // "ab" ends at col 2, tab at col 2 should expand to 2 spaces (next multiple of 4 is 4)
+        assert_eq!(expand_tabs_with_width("ab\tc", 4), "ab  c");
+        // "abc" ends at col 3, tab at col 3 should expand to 1 space (next multiple of 4 is 4)
+        assert_eq!(expand_tabs_with_width("abc\td", 4), "abc d");
+        // "abcd" ends at col 4, tab at col 4 should expand to 4 spaces (next multiple of 4 is 8)
+        assert_eq!(expand_tabs_with_width("abcd\te", 4), "abcd    e");
+    }
+
+    #[test]
+    fn test_expand_tabs_multiple_tabs() {
+        // Two tabs: first at col 0 -> 4 spaces, second at col 4 -> 4 spaces
+        assert_eq!(expand_tabs_with_width("\t\thello", 4), "        hello");
+        // "a" + tab + "b" + tab
+        assert_eq!(expand_tabs_with_width("a\tb\tc", 4), "a   b   c");
+    }
+
+    #[test]
+    fn test_expand_tabs_different_widths() {
+        assert_eq!(expand_tabs_with_width("\thello", 2), "  hello");
+        assert_eq!(expand_tabs_with_width("a\tb", 2), "a b");
+        assert_eq!(expand_tabs_with_width("\thello", 8), "        hello");
+    }
+
+    #[test]
+    fn test_expand_tabs_empty_string() {
+        assert_eq!(expand_tabs_with_width("", 4), "");
+    }
+
+    #[test]
+    fn test_expand_tabs_only_tabs() {
+        assert_eq!(expand_tabs_with_width("\t", 4), "    ");
+        assert_eq!(expand_tabs_with_width("\t\t", 4), "        ");
+    }
+
+    #[test]
+    fn test_config_default() {
+        let config = Config::default();
+        assert_eq!(config.theme, "gruvbox-dark");
+        assert_eq!(config.tab_width, 4);
+    }
+
+    #[test]
+    fn test_config_expand_tabs() {
+        let config = Config {
+            theme: "gruvbox-dark".to_string(),
+            tab_width: 4,
+        };
+        assert_eq!(config.expand_tabs("\thello"), "    hello");
+
+        let config_width_8 = Config {
+            theme: "gruvbox-dark".to_string(),
+            tab_width: 8,
+        };
+        assert_eq!(config_width_8.expand_tabs("\thello"), "        hello");
+    }
+
+    #[test]
+    fn test_config_load_missing_file() {
+        // This test assumes no config file exists at the default location
+        // or that the config directory doesn't exist. Since we can't control
+        // that in a unit test easily, we just verify the function doesn't panic.
+        let result = Config::load();
+        assert!(result.is_ok());
     }
 }

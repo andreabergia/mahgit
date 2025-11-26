@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
-use mahgit::{repository::Repository, status::RepositoryStatus, ui::App};
+use mahgit::{config::Config, repository::Repository, status::RepositoryStatus, ui::App};
 use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 
 /// TestApp wraps App to provide TestBackend-based testing functionality
@@ -22,7 +22,8 @@ impl TestApp {
         // Make sure to load the status from the repository
         status.reload(&repository)?;
 
-        let app = App::new(repository, status);
+        let config = Config::default();
+        let app = App::new(repository, status, config);
 
         Ok(Self { app, terminal })
     }

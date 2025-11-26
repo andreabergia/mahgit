@@ -5,6 +5,7 @@ pub mod input;
 pub mod navigation;
 pub mod status_view;
 
+use crate::config::Config;
 use crate::diff::DiffGenerator;
 use crate::operations::HunkStager;
 use crate::operations::StagingOperations;
@@ -32,6 +33,7 @@ pub struct App {
     feedback_manager: FeedbackManager,
     show_help: bool,
     pending_editor_file: Option<String>,
+    config: Config,
 }
 
 #[derive(Clone, PartialEq)]
@@ -50,7 +52,7 @@ enum VerticalDirection {
 }
 
 impl App {
-    pub fn new(repository: Repository, status: RepositoryStatus) -> Self {
+    pub fn new(repository: Repository, status: RepositoryStatus, config: Config) -> Self {
         let navigation = NavigationState::new(&status);
         Self {
             should_quit: false,
@@ -61,7 +63,12 @@ impl App {
             feedback_manager: FeedbackManager::new(),
             show_help: false,
             pending_editor_file: None,
+            config,
         }
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
     }
 
     pub fn is_showing_help(&self) -> bool {
@@ -600,7 +607,7 @@ impl App {
         let area = f.area();
 
         // Always render the status view (now with inline diffs)
-        let status_view = StatusView::new(&self.status, &self.navigation);
+        let status_view = StatusView::new(&self.status, &self.navigation, self.config.tab_width);
         status_view.render(f, area);
 
         // Render feedback message if there is one

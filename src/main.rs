@@ -36,7 +36,7 @@ fn load_config() -> Config {
     }
 }
 
-fn run(_config: Config) -> Result<(), RepositoryError> {
+fn run(config: Config) -> Result<(), RepositoryError> {
     let args: Vec<String> = env::args().collect();
     let use_console = args.iter().any(|arg| arg == "--console");
 
@@ -46,7 +46,7 @@ fn run(_config: Config) -> Result<(), RepositoryError> {
     if use_console {
         console::display_status(&status);
     } else {
-        let mut app = App::new(repo, status);
+        let mut app = App::new(repo, status, config);
         if let Err(e) = app.run() {
             eprintln!("UI Error: {}", e);
             process::exit(1);

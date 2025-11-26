@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
-use mahgit::{status::RepositoryStatus, ui::App};
+use mahgit::{config::Config, status::RepositoryStatus, ui::App};
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
@@ -26,7 +26,8 @@ fn test_help_window() {
         .expect("Failed to create test repository")
         .repository;
     let status = RepositoryStatus::empty();
-    let mut app = App::new(repository, status);
+    let config = Config::default();
+    let mut app = App::new(repository, status, config);
 
     let help_key = create_key_event('?');
 

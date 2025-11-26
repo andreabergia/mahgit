@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::diff::generator::DiffError;
 use crate::diff::{Diff, DiffLine, LineType};
 use ratatui::{
@@ -18,25 +19,28 @@ pub struct DiffView {
     scroll_position: usize,
     viewport_height: usize,
     current_hunk_index: Option<usize>,
+    config: Config,
 }
 
 impl DiffView {
-    pub fn new(diff: Diff) -> Self {
+    pub fn new(diff: Diff, config: Config) -> Self {
         let current_hunk_index = if diff.hunks.is_empty() { None } else { Some(0) };
         Self {
             content: DiffViewContent::Success(diff),
             scroll_position: 0,
             viewport_height: 0,
             current_hunk_index,
+            config,
         }
     }
 
-    pub fn new_with_error(file_path: String, error: DiffError) -> Self {
+    pub fn new_with_error(file_path: String, error: DiffError, config: Config) -> Self {
         Self {
             content: DiffViewContent::Error { file_path, error },
             scroll_position: 0,
             viewport_height: 0,
             current_hunk_index: None,
+            config,
         }
     }
 
@@ -177,8 +181,12 @@ impl DiffView {
             LineType::NoNewlineEOF => ("\\", Color::Yellow),
         };
 
+        // Expand tabs in the line content
+        let expanded_content =
+            crate::config::expand_tabs_with_width(&diff_line.content, self.config.tab_width);
+
         // Just format the content with prefix, no line numbers for individual lines
-        let content = format!("{}{}", prefix, diff_line.content);
+        let content = format!("{}{}", prefix, expanded_content);
 
         Line::from(Span::styled(content, Style::default().fg(color)))
     }
@@ -442,14 +450,16 @@ mod tests {
     #[test]
     fn test_diff_view_creation() {
         let diff = create_test_diff();
-        let diff_view = DiffView::new(diff);
+        let config = Config::default();
+        let diff_view = DiffView::new(diff, config);
         assert_eq!(diff_view.scroll_position, 0);
     }
 
     #[test]
     fn test_scrolling() {
         let diff = create_test_diff();
-        let mut diff_view = DiffView::new(diff);
+        let config = Config::default();
+        let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 2; // Small viewport to enable scrolling
 
         // Test scroll down
@@ -469,7 +479,8 @@ mod tests {
     fn test_binary_diff() {
         let mut diff = create_test_diff();
         diff.binary = true;
-        let diff_view = DiffView::new(diff);
+        let config = Config::default();
+        let diff_view = DiffView::new(diff, config);
         match &diff_view.content {
             DiffViewContent::Success(diff) => assert!(diff.binary),
             _ => panic!("Expected successful diff content"),
@@ -479,7 +490,8 @@ mod tests {
     #[test]
     fn test_hunk_navigation() {
         let diff = create_test_diff();
-        let mut diff_view = DiffView::new(diff);
+        let config = Config::default();
+        let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
 
         // Should start at position 0
@@ -497,7 +509,8 @@ mod tests {
     #[test]
     fn test_arrow_key_navigation() {
         let diff = create_test_diff();
-        let mut diff_view = DiffView::new(diff);
+        let config = Config::default();
+        let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
 
         // Should start with first hunk selected
@@ -589,7 +602,8 @@ mod tests {
     #[test]
     fn test_multi_hunk_navigation() {
         let diff = create_multi_hunk_diff();
-        let mut diff_view = DiffView::new(diff);
+        let config = Config::default();
+        let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
 
         // Should start with first hunk selected
@@ -616,11 +630,12 @@ mod tests {
     #[test]
     fn test_hunk_count() {
         let single_hunk_diff = create_test_diff();
-        let single_hunk_view = DiffView::new(single_hunk_diff);
+        let config = Config::default();
+        let single_hunk_view = DiffView::new(single_hunk_diff, config.clone());
         assert_eq!(single_hunk_view.get_hunk_count(), 1);
 
         let multi_hunk_diff = create_multi_hunk_diff();
-        let multi_hunk_view = DiffView::new(multi_hunk_diff);
+        let multi_hunk_view = DiffView::new(multi_hunk_diff, config.clone());
         assert_eq!(multi_hunk_view.get_hunk_count(), 2);
 
         let empty_diff = Diff {
@@ -629,7 +644,7 @@ mod tests {
             hunks: vec![],
             binary: false,
         };
-        let empty_view = DiffView::new(empty_diff);
+        let empty_view = DiffView::new(empty_diff, config);
         assert_eq!(empty_view.get_hunk_count(), 0);
         assert_eq!(empty_view.get_current_hunk_index(), None);
     }

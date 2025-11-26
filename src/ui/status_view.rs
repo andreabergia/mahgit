@@ -45,11 +45,20 @@ impl<'a> ListRenderContext<'a> {
 pub struct StatusView<'a> {
     status: &'a RepositoryStatus,
     navigation: &'a NavigationState,
+    tab_width: usize,
 }
 
 impl<'a> StatusView<'a> {
-    pub fn new(status: &'a RepositoryStatus, navigation: &'a NavigationState) -> Self {
-        Self { status, navigation }
+    pub fn new(
+        status: &'a RepositoryStatus,
+        navigation: &'a NavigationState,
+        tab_width: usize,
+    ) -> Self {
+        Self {
+            status,
+            navigation,
+            tab_width,
+        }
     }
 
     pub fn render(&self, f: &mut Frame, area: Rect) {
@@ -431,8 +440,11 @@ impl<'a> StatusView<'a> {
                         LineType::NoNewlineEOF => ("\\", Color::Yellow),
                     };
 
+                    // Expand tabs in the line content
+                    let expanded_content = self.expand_tabs(&line.content);
+
                     items.push(ListItem::new(Line::from(Span::styled(
-                        format!("      {}{}", prefix, line.content),
+                        format!("      {}{}", prefix, expanded_content),
                         Style::default().fg(color),
                     ))));
                 }
@@ -465,5 +477,9 @@ impl<'a> StatusView<'a> {
         };
 
         (icon, icon_style)
+    }
+
+    fn expand_tabs(&self, line: &str) -> String {
+        crate::config::expand_tabs_with_width(line, self.tab_width)
     }
 }
