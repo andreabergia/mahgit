@@ -1,4 +1,4 @@
-use crate::diff::{Diff, DiffContext, DiffHunk, DiffLine, LineType};
+use crate::diff::{Diff, DiffContext, DiffHunk, DiffLine, LineType, inline::compute_inline_diffs};
 use git2::{DiffOptions, Repository};
 use std::path::Path;
 
@@ -135,6 +135,7 @@ impl<'repo> DiffGenerator<'repo> {
                         line_type,
                         old_line_no,
                         new_line_no,
+                        inline_diff: None,
                     };
 
                     if let Some(last_hunk) = hunks.last_mut() {
@@ -169,15 +170,21 @@ impl<'repo> DiffGenerator<'repo> {
             && let Ok(synthetic_diff) =
                 self.generate_untracked_file_diff(file_path, context.clone())
         {
+            let mut synthetic_diff = synthetic_diff;
+            compute_inline_diffs(&mut synthetic_diff);
             return Ok(synthetic_diff);
         }
 
-        Ok(Diff {
+        let mut diff = Diff {
             file_path: file_path.to_string(),
             context,
             hunks,
             binary,
-        })
+        };
+
+        compute_inline_diffs(&mut diff);
+
+        Ok(diff)
     }
 
     fn check_file_constraints(
@@ -317,6 +324,7 @@ impl<'repo> DiffGenerator<'repo> {
                 line_type: crate::diff::LineType::Addition,
                 old_line_no: None,
                 new_line_no: Some(i + 1),
+                inline_diff: None,
             });
         }
 
@@ -332,12 +340,16 @@ impl<'repo> DiffGenerator<'repo> {
             context_lines: 3,
         };
 
-        Ok(Diff {
+        let mut diff = Diff {
             file_path: file_path.to_string(),
             context,
             hunks: vec![hunk],
             binary: false,
-        })
+        };
+
+        compute_inline_diffs(&mut diff);
+
+        Ok(diff)
     }
 
     fn generate_deleted_file_diff(
@@ -393,6 +405,7 @@ impl<'repo> DiffGenerator<'repo> {
                 line_type: crate::diff::LineType::Deletion,
                 old_line_no: Some(i + 1),
                 new_line_no: None,
+                inline_diff: None,
             });
         }
 
@@ -408,12 +421,16 @@ impl<'repo> DiffGenerator<'repo> {
             context_lines: 3,
         };
 
-        Ok(Diff {
+        let mut diff = Diff {
             file_path: file_path.to_string(),
             context,
             hunks: vec![hunk],
             binary: false,
-        })
+        };
+
+        compute_inline_diffs(&mut diff);
+
+        Ok(diff)
     }
 }
 

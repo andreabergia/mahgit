@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::diff::{Diff, LineType};
 use crate::status::{FileEntry, RepositoryStatus};
+use crate::ui::inline_diff::InlineDiffRenderer;
 use crate::ui::navigation::{FileDiffKey, NavigationState, SelectionCursor, StatusSection};
 use ratatui::{
     Frame,
@@ -520,10 +521,17 @@ impl<'a> StatusView<'a> {
                         " ",
                         self.apply_hunk_highlight(Style::default()),
                     ));
-                    spans.push(Span::styled(
-                        format!("{}{}", prefix, expanded_content),
-                        content_style,
-                    ));
+                    let content_spans = if let Some(inline_diff) = &line.inline_diff {
+                        let renderer = InlineDiffRenderer::new(self.config);
+                        renderer.inline_content_spans(inline_diff, content_style, prefix)
+                    } else {
+                        vec![Span::styled(
+                            format!("{}{}", prefix, expanded_content),
+                            content_style,
+                        )]
+                    };
+
+                    spans.extend(content_spans);
 
                     items.push(ListItem::new(Line::from(spans)));
                 }

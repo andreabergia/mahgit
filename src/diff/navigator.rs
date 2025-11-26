@@ -148,18 +148,21 @@ mod tests {
                     line_type: LineType::Context,
                     old_line_no: Some(1),
                     new_line_no: Some(1),
+                    inline_diff: None,
                 },
                 DiffLine {
                     content: "old line".to_string(),
                     line_type: LineType::Deletion,
                     old_line_no: Some(2),
                     new_line_no: None,
+                    inline_diff: None,
                 },
                 DiffLine {
                     content: "new line".to_string(),
                     line_type: LineType::Addition,
                     old_line_no: None,
                     new_line_no: Some(2),
+                    inline_diff: None,
                 },
             ],
         };
@@ -188,12 +191,14 @@ mod tests {
                     line_type: LineType::Context,
                     old_line_no: Some(10),
                     new_line_no: Some(11),
+                    inline_diff: None,
                 },
                 DiffLine {
                     content: "new line added".to_string(),
                     line_type: LineType::Addition,
                     old_line_no: None,
                     new_line_no: Some(12),
+                    inline_diff: None,
                 },
             ],
         };

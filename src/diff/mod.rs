@@ -1,4 +1,5 @@
 pub mod generator;
+pub mod inline;
 pub mod navigator;
 pub mod parser;
 
@@ -52,6 +53,7 @@ pub struct DiffLine {
     pub line_type: LineType,
     pub old_line_no: Option<usize>,
     pub new_line_no: Option<usize>,
+    pub inline_diff: Option<InlineDiff>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +62,24 @@ pub enum LineType {
     Addition,
     Deletion,
     NoNewlineEOF,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineDiff {
+    pub segments: Vec<InlineDiffSegment>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineDiffSegment {
+    pub content: String,
+    pub change: InlineChange,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InlineChange {
+    Unchanged,
+    Added,
+    Removed,
 }
 
 #[derive(Debug, PartialEq)]

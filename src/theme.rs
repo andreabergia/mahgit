@@ -20,6 +20,8 @@ pub struct Theme {
     pub diff_gutter_context: Color,
     pub diff_gutter_focused: Color,
     pub diff_hunk_highlight: Color,
+    pub diff_inline_addition: Color,
+    pub diff_inline_deletion: Color,
     pub help_key: Color,
     pub help_desc: Color,
 }
@@ -62,6 +64,8 @@ impl Theme {
             diff_gutter_context: Color::DarkGray,
             diff_gutter_focused: Color::DarkGray,
             diff_hunk_highlight: Color::Gray,
+            diff_inline_addition: Color::Rgb(60, 76, 58),
+            diff_inline_deletion: Color::Rgb(92, 51, 46),
             help_key: Color::Cyan,
             help_desc: Color::White,
         }
@@ -93,6 +97,8 @@ impl Theme {
             diff_gutter_context: Color::Gray,
             diff_gutter_focused: Color::Gray,
             diff_hunk_highlight: Color::Gray,
+            diff_inline_addition: Color::Rgb(213, 238, 214),
+            diff_inline_deletion: Color::Rgb(244, 222, 222),
             help_key: Color::Blue,
             help_desc: Color::Black,
         }
@@ -124,6 +130,8 @@ impl Theme {
             diff_gutter_context: Color::Rgb(99, 110, 123), // #636E7B
             diff_gutter_focused: Color::Rgb(78, 87, 99), // muted slate instead of gold
             diff_hunk_highlight: Color::Rgb(45, 51, 59), // slightly brighter than background
+            diff_inline_addition: Color::Rgb(35, 76, 38), // muted green block highlight
+            diff_inline_deletion: Color::Rgb(81, 38, 33), // muted red block highlight
             help_key: Color::Rgb(127, 219, 202),        // #7FDBCA
             help_desc: Color::Rgb(201, 209, 217),       // #C9D1D9
         }
@@ -155,6 +163,8 @@ impl Theme {
             diff_gutter_context: Color::Rgb(175, 184, 193), // #AFB8C1
             diff_gutter_focused: Color::Rgb(147, 155, 165), // muted gray
             diff_hunk_highlight: Color::Rgb(224, 227, 231), // softer highlight
+            diff_inline_addition: Color::Rgb(218, 251, 225), // #DAFBE1
+            diff_inline_deletion: Color::Rgb(255, 235, 233), // #FFEBE9
             help_key: Color::Rgb(9, 105, 218),          // #0969DA
             help_desc: Color::Rgb(36, 41, 47),          // #24292F
         }

@@ -945,6 +945,7 @@ mod tests {
                 line_type: LineType::Context,
                 old_line_no: Some(1),
                 new_line_no: Some(1),
+                inline_diff: None,
             }],
             old_range: LineRange { start: 1, count: 1 },
             new_range: LineRange { start: 1, count: 1 },

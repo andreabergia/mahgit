@@ -1,6 +1,7 @@
 pub mod console;
 pub mod diff_view;
 pub mod feedback;
+pub mod inline_diff;
 pub mod input;
 pub mod navigation;
 pub mod status_view;

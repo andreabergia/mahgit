@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::diff::generator::DiffError;
 use crate::diff::{Diff, DiffLine, LineType};
+use crate::ui::inline_diff::InlineDiffRenderer;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -254,10 +255,17 @@ impl DiffView {
             " ",
             self.apply_hunk_highlight(Style::default(), is_current_hunk),
         ));
-        spans.push(Span::styled(
-            format!("{}{}", prefix, expanded_content),
-            content_style,
-        ));
+        let content_spans = if let Some(inline_diff) = &diff_line.inline_diff {
+            let renderer = InlineDiffRenderer::new(&self.config);
+            renderer.inline_content_spans(inline_diff, content_style, prefix)
+        } else {
+            vec![Span::styled(
+                format!("{}{}", prefix, expanded_content),
+                content_style,
+            )]
+        };
+
+        spans.extend(content_spans);
 
         Line::from(spans)
     }
@@ -541,18 +549,21 @@ mod tests {
                     line_type: LineType::Context,
                     old_line_no: Some(1),
                     new_line_no: Some(1),
+                    inline_diff: None,
                 },
                 DiffLine {
                     content: "old line".to_string(),
                     line_type: LineType::Deletion,
                     old_line_no: Some(2),
                     new_line_no: None,
+                    inline_diff: None,
                 },
                 DiffLine {
                     content: "new line".to_string(),
                     line_type: LineType::Addition,
                     old_line_no: None,
                     new_line_no: Some(2),
+                    inline_diff: None,
                 },
             ],
         };
@@ -690,12 +701,14 @@ mod tests {
                     line_type: LineType::Context,
                     old_line_no: Some(1),
                     new_line_no: Some(1),
+                    inline_diff: None,
                 },
                 DiffLine {
                     content: "old line".to_string(),
                     line_type: LineType::Deletion,
                     old_line_no: Some(2),
                     new_line_no: None,
+                    inline_diff: None,
                 },
             ],
         };
@@ -724,12 +737,14 @@ mod tests {
                     line_type: LineType::Context,
                     old_line_no: Some(10),
                     new_line_no: Some(11),
+                    inline_diff: None,
                 },
                 DiffLine {
                     content: "new line".to_string(),
                     line_type: LineType::Addition,
                     old_line_no: None,
                     new_line_no: Some(12),
+                    inline_diff: None,
                 },
             ],
         };

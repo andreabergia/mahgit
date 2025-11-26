@@ -1,4 +1,7 @@
-use crate::diff::{Diff, DiffContext, DiffHunk, DiffLine, HunkHeader, LineRange, LineType};
+use crate::diff::{
+    Diff, DiffContext, DiffHunk, DiffLine, HunkHeader, LineRange, LineType,
+    inline::compute_inline_diffs,
+};
 use git2::{DiffFormat, DiffHunk as Git2DiffHunk, DiffLine as Git2DiffLine};
 
 #[derive(Debug, thiserror::Error)]
@@ -56,12 +59,16 @@ impl DiffParser {
             return Err(ParseError::BinaryFile(file_path.to_string()));
         }
 
-        Ok(Diff {
+        let mut diff = Diff {
             file_path: file_path.to_string(),
             context,
             hunks,
             binary,
-        })
+        };
+
+        compute_inline_diffs(&mut diff);
+
+        Ok(diff)
     }
 
     fn parse_hunk(&self, hunk: &Git2DiffHunk) -> DiffHunk {
@@ -105,6 +112,7 @@ impl DiffParser {
             line_type,
             old_line_no: line.old_lineno().map(|n| n as usize),
             new_line_no: line.new_lineno().map(|n| n as usize),
+            inline_diff: None,
         }
     }
 }
