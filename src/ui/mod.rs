@@ -226,6 +226,13 @@ impl App {
             Command::ShowHelp => {
                 self.show_help = !self.show_help;
             }
+            Command::CloseHelp => {
+                if self.show_help {
+                    self.show_help = false;
+                } else {
+                    self.should_quit = true;
+                }
+            }
             Command::StageFile => {
                 self.stage_selected_file();
             }
@@ -723,7 +730,7 @@ impl App {
 
         let help_block = Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT) // No bottom border for slide-up effect
-            .title(" Help - Press '?' to close ")
+            .title(" Help - Press '?' or 'Esc' to close ")
             .style(Style::default()); // No background color, use terminal default
 
         // Render the block first

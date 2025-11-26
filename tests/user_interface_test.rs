@@ -20,6 +20,15 @@ fn create_key_event(ch: char) -> KeyEvent {
     }
 }
 
+fn create_esc_key_event() -> KeyEvent {
+    KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        kind: crossterm::event::KeyEventKind::Press,
+        state: crossterm::event::KeyEventState::NONE,
+    }
+}
+
 #[test]
 fn test_help_window() {
     let repository = create_test_repository()
@@ -47,6 +56,51 @@ fn test_help_window() {
     assert!(
         !app.is_showing_help(),
         "Help should hide after pressing '?' again"
+    );
+}
+
+#[test]
+fn test_help_window_esc_behavior() {
+    let repository = create_test_repository()
+        .expect("Failed to create test repository")
+        .repository;
+    let status = RepositoryStatus::empty();
+    let theme = mahgit::theme::Theme::from_name("gruvbox-dark").unwrap();
+    let config = Config {
+        theme,
+        tab_width: 4,
+    };
+    let mut app = App::new(repository, status, config);
+
+    let help_key = create_key_event('?');
+    let esc_key = create_esc_key_event();
+
+    // Initially help should not be showing
+    assert!(!app.is_showing_help(), "Help should be hidden initially");
+    assert!(!app.should_quit(), "App should not be quitting");
+
+    // Open help with '?'
+    app.process_key_event(help_key);
+    assert!(app.is_showing_help(), "Help should show after pressing '?'");
+    assert!(!app.should_quit(), "App should not be quitting");
+
+    // Close help with Esc (should not quit)
+    app.process_key_event(esc_key);
+    assert!(
+        !app.is_showing_help(),
+        "Help should hide after pressing Esc"
+    );
+    assert!(
+        !app.should_quit(),
+        "App should not quit when Esc closes help"
+    );
+
+    // Press Esc again when help is closed (should quit)
+    app.process_key_event(esc_key);
+    assert!(!app.is_showing_help(), "Help should still be hidden");
+    assert!(
+        app.should_quit(),
+        "App should quit when Esc is pressed with help closed"
     );
 }
 

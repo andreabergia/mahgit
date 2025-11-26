@@ -48,6 +48,7 @@ pub enum Command {
 
     // Help
     ShowHelp,
+    CloseHelp,
 
     // Unknown command
     Unknown,
@@ -149,6 +150,13 @@ impl InputHandler {
             } => {
                 self.clear_sequence_state();
                 Command::PageDiffUp
+            }
+
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } => {
+                self.clear_sequence_state();
+                Command::CloseHelp
             }
 
             // Control sequences
@@ -291,7 +299,8 @@ impl InputHandler {
             "  r       Refresh repository status",
             "",
             "Help:",
-            "  ?       Show this help",
+            "  ?       Toggle help",
+            "  Esc     Close help",
         ]
     }
 }
@@ -495,7 +504,8 @@ mod tests {
         let help_text = InputHandler::get_help_text();
         assert!(!help_text.is_empty());
         assert!(help_text.iter().any(|line| line.contains("?")));
-        assert!(help_text.iter().any(|line| line.contains("Show this help")));
+        assert!(help_text.iter().any(|line| line.contains("Toggle help")));
+        assert!(help_text.iter().any(|line| line.contains("Close help")));
     }
 
     #[test]
