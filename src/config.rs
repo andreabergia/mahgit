@@ -9,6 +9,7 @@ use std::path::PathBuf;
 struct ConfigFile {
     theme: String,
     tab_width: usize,
+    show_line_numbers: bool,
 }
 
 impl Default for ConfigFile {
@@ -16,6 +17,7 @@ impl Default for ConfigFile {
         Self {
             theme: "gruvbox-dark".to_string(),
             tab_width: 4,
+            show_line_numbers: true,
         }
     }
 }
@@ -26,6 +28,7 @@ impl Default for ConfigFile {
 pub struct Config {
     pub theme: Theme,
     pub tab_width: usize,
+    pub show_line_numbers: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -93,6 +96,7 @@ impl Config {
         Ok(Config {
             theme,
             tab_width: config_file.tab_width,
+            show_line_numbers: config_file.show_line_numbers,
         })
     }
 
@@ -184,6 +188,7 @@ mod tests {
         let config_file = ConfigFile::default();
         assert_eq!(config_file.theme, "gruvbox-dark");
         assert_eq!(config_file.tab_width, 4);
+        assert!(config_file.show_line_numbers);
     }
 
     #[test]
@@ -192,6 +197,7 @@ mod tests {
         let config = Config {
             theme,
             tab_width: 4,
+            show_line_numbers: true,
         };
         assert_eq!(config.expand_tabs("\thello"), "    hello");
 
@@ -199,6 +205,7 @@ mod tests {
         let config_width_8 = Config {
             theme: theme_8,
             tab_width: 8,
+            show_line_numbers: true,
         };
         assert_eq!(config_width_8.expand_tabs("\thello"), "        hello");
     }

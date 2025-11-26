@@ -13,6 +13,12 @@ use ratatui::{
 const ICON_COLLAPSED: &str = "▸";
 const ICON_EXPANDED: &str = "▾";
 
+#[derive(Debug, Clone, Copy)]
+struct LineNumberWidths {
+    old: usize,
+    new: usize,
+}
+
 struct ListRenderContext<'a> {
     selected_list_index: &'a mut Option<usize>,
     scroll_targets: &'a mut Vec<usize>,
@@ -412,6 +418,12 @@ impl<'a> StatusView<'a> {
             return;
         }
 
+        let line_number_widths = if self.config.show_line_numbers {
+            Some(self.calculate_line_number_widths(diff))
+        } else {
+            None
+        };
+
         for (idx, hunk) in diff.hunks.iter().enumerate() {
             // Check if this hunk is collapsed
             let key = FileDiffKey::new(diff.file_path.clone(), section.into());
@@ -456,20 +468,64 @@ impl<'a> StatusView<'a> {
                         LineType::NoNewlineEOF => ("\\", self.config.theme.diff_no_newline),
                     };
 
+                    let gutter_color = match line.line_type {
+                        LineType::Addition => self.config.theme.diff_gutter_addition,
+                        LineType::Deletion => self.config.theme.diff_gutter_deletion,
+                        LineType::Context => self.config.theme.diff_gutter_context,
+                        LineType::NoNewlineEOF => self.config.theme.diff_no_newline,
+                    };
+
                     // Expand tabs in the line content
                     let expanded_content = self.expand_tabs(&line.content);
 
-                    // Apply subtle background to diff lines in selected hunk
-                    let line_style = if is_selected {
-                        Style::default().fg(color).bg(self.config.theme.selected_bg)
-                    } else {
-                        Style::default().fg(color)
-                    };
+                    let mut content_style = Style::default().fg(color);
+                    let mut gutter_style = Style::default().fg(gutter_color);
+                    if matches!(line.line_type, LineType::Context) && !is_selected {
+                        content_style = content_style.add_modifier(Modifier::DIM);
+                        gutter_style = gutter_style.add_modifier(Modifier::DIM);
+                    }
 
-                    items.push(ListItem::new(Line::from(Span::styled(
-                        format!("      {}{}", prefix, expanded_content),
-                        line_style,
-                    ))));
+                    if is_selected {
+                        content_style = self.apply_hunk_highlight(content_style);
+                        gutter_style = gutter_style.bg(self.config.theme.diff_gutter_focused);
+                    }
+
+                    let mut spans: Vec<Span> = Vec::new();
+                    spans.push(Span::raw("      "));
+
+                    if let Some(widths) = line_number_widths {
+                        let mut line_number_style =
+                            Style::default().fg(self.config.theme.diff_line_number);
+                        if matches!(line.line_type, LineType::Context) && !is_selected {
+                            line_number_style = line_number_style.add_modifier(Modifier::DIM);
+                        }
+                        if is_selected {
+                            line_number_style = self.apply_hunk_highlight(line_number_style);
+                        }
+
+                        spans.push(Span::styled(
+                            self.format_line_number(line.old_line_no, widths.old),
+                            line_number_style,
+                        ));
+                        spans.push(Span::styled(" ", line_number_style));
+                        spans.push(Span::styled(
+                            self.format_line_number(line.new_line_no, widths.new),
+                            line_number_style,
+                        ));
+                        spans.push(Span::styled(" ", line_number_style));
+                    }
+
+                    spans.push(Span::styled("|", self.apply_hunk_highlight(gutter_style)));
+                    spans.push(Span::styled(
+                        " ",
+                        self.apply_hunk_highlight(Style::default()),
+                    ));
+                    spans.push(Span::styled(
+                        format!("{}{}", prefix, expanded_content),
+                        content_style,
+                    ));
+
+                    items.push(ListItem::new(Line::from(spans)));
                 }
             }
 
@@ -511,5 +567,48 @@ impl<'a> StatusView<'a> {
 
     fn expand_tabs(&self, line: &str) -> String {
         crate::config::expand_tabs_with_width(line, self.config.tab_width)
+    }
+
+    fn apply_hunk_highlight(&self, style: Style) -> Style {
+        if style.bg.is_some() {
+            style
+        } else {
+            style.bg(self.config.theme.diff_hunk_highlight)
+        }
+    }
+
+    fn calculate_line_number_widths(&self, diff: &Diff) -> LineNumberWidths {
+        let mut max_old = 0;
+        let mut max_new = 0;
+
+        for hunk in &diff.hunks {
+            for line in &hunk.lines {
+                if let Some(old) = line.old_line_no {
+                    max_old = max_old.max(old);
+                }
+                if let Some(new) = line.new_line_no {
+                    max_new = max_new.max(new);
+                }
+            }
+        }
+
+        LineNumberWidths {
+            old: Self::digit_width(max_old),
+            new: Self::digit_width(max_new),
+        }
+    }
+
+    fn digit_width(mut value: usize) -> usize {
+        let mut width = 1;
+        while value >= 10 {
+            value /= 10;
+            width += 1;
+        }
+        width
+    }
+
+    fn format_line_number(&self, number: Option<usize>, width: usize) -> String {
+        let text = number.map(|n| n.to_string()).unwrap_or_default();
+        format!("{text:>width$}")
     }
 }

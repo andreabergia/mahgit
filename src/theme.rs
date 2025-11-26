@@ -14,6 +14,12 @@ pub struct Theme {
     pub diff_hunk_header: Style,
     pub diff_hunk_header_focused: Style,
     pub diff_no_newline: Color,
+    pub diff_line_number: Color,
+    pub diff_gutter_addition: Color,
+    pub diff_gutter_deletion: Color,
+    pub diff_gutter_context: Color,
+    pub diff_gutter_focused: Color,
+    pub diff_hunk_highlight: Color,
     pub help_key: Color,
     pub help_desc: Color,
 }
@@ -50,6 +56,12 @@ impl Theme {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
             diff_no_newline: Color::DarkGray,
+            diff_line_number: Color::DarkGray,
+            diff_gutter_addition: Color::Green,
+            diff_gutter_deletion: Color::Red,
+            diff_gutter_context: Color::DarkGray,
+            diff_gutter_focused: Color::DarkGray,
+            diff_hunk_highlight: Color::Gray,
             help_key: Color::Cyan,
             help_desc: Color::White,
         }
@@ -75,6 +87,12 @@ impl Theme {
                 .fg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
             diff_no_newline: Color::Gray,
+            diff_line_number: Color::DarkGray,
+            diff_gutter_addition: Color::Green,
+            diff_gutter_deletion: Color::Red,
+            diff_gutter_context: Color::Gray,
+            diff_gutter_focused: Color::Gray,
+            diff_hunk_highlight: Color::Gray,
             help_key: Color::Blue,
             help_desc: Color::Black,
         }
@@ -100,6 +118,12 @@ impl Theme {
                 .fg(Color::Rgb(224, 175, 104)) // #E0AF68
                 .add_modifier(Modifier::BOLD),
             diff_no_newline: Color::Rgb(110, 118, 129), // #6E7681
+            diff_line_number: Color::Rgb(110, 118, 129), // #6E7681
+            diff_gutter_addition: Color::Rgb(46, 160, 67), // #2EA043
+            diff_gutter_deletion: Color::Rgb(190, 74, 72), // Slightly deeper red for gutter
+            diff_gutter_context: Color::Rgb(99, 110, 123), // #636E7B
+            diff_gutter_focused: Color::Rgb(78, 87, 99), // muted slate instead of gold
+            diff_hunk_highlight: Color::Rgb(45, 51, 59), // slightly brighter than background
             help_key: Color::Rgb(127, 219, 202),        // #7FDBCA
             help_desc: Color::Rgb(201, 209, 217),       // #C9D1D9
         }
@@ -125,6 +149,12 @@ impl Theme {
                 .fg(Color::Rgb(130, 80, 223)) // #8250DF
                 .add_modifier(Modifier::BOLD),
             diff_no_newline: Color::Rgb(101, 109, 118), // #656D76
+            diff_line_number: Color::Rgb(140, 149, 160), // #8C95A0
+            diff_gutter_addition: Color::Rgb(46, 160, 67), // #2EA043
+            diff_gutter_deletion: Color::Rgb(207, 34, 46), // #CF222E
+            diff_gutter_context: Color::Rgb(175, 184, 193), // #AFB8C1
+            diff_gutter_focused: Color::Rgb(147, 155, 165), // muted gray
+            diff_hunk_highlight: Color::Rgb(224, 227, 231), // softer highlight
             help_key: Color::Rgb(9, 105, 218),          // #0969DA
             help_desc: Color::Rgb(36, 41, 47),          // #24292F
         }

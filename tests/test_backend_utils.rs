@@ -26,6 +26,7 @@ impl TestApp {
         let config = Config {
             theme,
             tab_width: 4,
+            show_line_numbers: true,
         };
         let app = App::new(repository, status, config);
 

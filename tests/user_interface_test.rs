@@ -39,6 +39,7 @@ fn test_help_window() {
     let config = Config {
         theme,
         tab_width: 4,
+        show_line_numbers: true,
     };
     let mut app = App::new(repository, status, config);
 
@@ -69,6 +70,7 @@ fn test_help_window_esc_behavior() {
     let config = Config {
         theme,
         tab_width: 4,
+        show_line_numbers: true,
     };
     let mut app = App::new(repository, status, config);
 

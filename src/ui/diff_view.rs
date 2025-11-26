@@ -4,7 +4,7 @@ use crate::diff::{Diff, DiffLine, LineType};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
@@ -20,6 +20,12 @@ pub struct DiffView {
     viewport_height: usize,
     current_hunk_index: Option<usize>,
     config: Config,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LineNumberWidths {
+    old: usize,
+    new: usize,
 }
 
 impl DiffView {
@@ -151,6 +157,11 @@ impl DiffView {
 
     fn generate_diff_lines(&self, diff: &Diff) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
+        let line_number_widths = if self.config.show_line_numbers {
+            Some(self.calculate_line_number_widths(diff))
+        } else {
+            None
+        };
 
         for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
             // Determine if this is the current hunk
@@ -170,7 +181,8 @@ impl DiffView {
 
             // Add diff lines
             for diff_line in &hunk.lines {
-                let line = self.format_diff_line(diff_line);
+                let line =
+                    self.format_diff_line(diff_line, line_number_widths.as_ref(), is_current_hunk);
                 lines.push(line);
             }
         }
@@ -178,7 +190,12 @@ impl DiffView {
         lines
     }
 
-    fn format_diff_line(&self, diff_line: &DiffLine) -> Line<'static> {
+    fn format_diff_line(
+        &self,
+        diff_line: &DiffLine,
+        line_number_widths: Option<&LineNumberWidths>,
+        is_current_hunk: bool,
+    ) -> Line<'static> {
         let (prefix, color) = match diff_line.line_type {
             LineType::Addition => ("+", self.config.theme.staged),
             LineType::Deletion => ("-", self.config.theme.unstaged),
@@ -186,14 +203,110 @@ impl DiffView {
             LineType::NoNewlineEOF => ("\\", self.config.theme.diff_no_newline),
         };
 
+        let gutter_color = match diff_line.line_type {
+            LineType::Addition => self.config.theme.diff_gutter_addition,
+            LineType::Deletion => self.config.theme.diff_gutter_deletion,
+            LineType::Context => self.config.theme.diff_gutter_context,
+            LineType::NoNewlineEOF => self.config.theme.diff_no_newline,
+        };
+
+        let mut content_style = Style::default().fg(color);
+        let mut gutter_style = Style::default().fg(gutter_color);
+        if matches!(diff_line.line_type, LineType::Context) && !is_current_hunk {
+            content_style = content_style.add_modifier(Modifier::DIM);
+            gutter_style = gutter_style.add_modifier(Modifier::DIM);
+        }
+
+        if is_current_hunk {
+            gutter_style = gutter_style.bg(self.config.theme.diff_gutter_focused);
+        }
+
+        content_style = self.apply_hunk_highlight(content_style, is_current_hunk);
+        gutter_style = self.apply_hunk_highlight(gutter_style, is_current_hunk);
+
         // Expand tabs in the line content
         let expanded_content =
             crate::config::expand_tabs_with_width(&diff_line.content, self.config.tab_width);
 
-        // Just format the content with prefix, no line numbers for individual lines
-        let content = format!("{}{}", prefix, expanded_content);
+        let mut spans: Vec<Span> = Vec::new();
 
-        Line::from(Span::styled(content, Style::default().fg(color)))
+        if let Some(widths) = line_number_widths {
+            let mut line_number_style = Style::default().fg(self.config.theme.diff_line_number);
+            if matches!(diff_line.line_type, LineType::Context) && !is_current_hunk {
+                line_number_style = line_number_style.add_modifier(Modifier::DIM);
+            }
+            line_number_style = self.apply_hunk_highlight(line_number_style, is_current_hunk);
+
+            spans.push(Span::styled(
+                self.format_line_number(diff_line.old_line_no, widths.old),
+                line_number_style,
+            ));
+            spans.push(Span::styled(" ", line_number_style));
+            spans.push(Span::styled(
+                self.format_line_number(diff_line.new_line_no, widths.new),
+                line_number_style,
+            ));
+            spans.push(Span::styled(" ", line_number_style));
+        }
+
+        spans.push(Span::styled("|", gutter_style));
+        spans.push(Span::styled(
+            " ",
+            self.apply_hunk_highlight(Style::default(), is_current_hunk),
+        ));
+        spans.push(Span::styled(
+            format!("{}{}", prefix, expanded_content),
+            content_style,
+        ));
+
+        Line::from(spans)
+    }
+
+    fn apply_hunk_highlight(&self, style: Style, is_current_hunk: bool) -> Style {
+        if is_current_hunk {
+            if style.bg.is_some() {
+                style
+            } else {
+                style.bg(self.config.theme.diff_hunk_highlight)
+            }
+        } else {
+            style
+        }
+    }
+
+    fn calculate_line_number_widths(&self, diff: &Diff) -> LineNumberWidths {
+        let mut max_old = 0;
+        let mut max_new = 0;
+
+        for hunk in &diff.hunks {
+            for line in &hunk.lines {
+                if let Some(old) = line.old_line_no {
+                    max_old = max_old.max(old);
+                }
+                if let Some(new) = line.new_line_no {
+                    max_new = max_new.max(new);
+                }
+            }
+        }
+
+        LineNumberWidths {
+            old: Self::digit_width(max_old),
+            new: Self::digit_width(max_new),
+        }
+    }
+
+    fn digit_width(mut value: usize) -> usize {
+        let mut width = 1;
+        while value >= 10 {
+            value /= 10;
+            width += 1;
+        }
+        width
+    }
+
+    fn format_line_number(&self, number: Option<usize>, width: usize) -> String {
+        let text = number.map(|n| n.to_string()).unwrap_or_default();
+        format!("{text:>width$}")
     }
 
     fn render_scrollbar(
@@ -459,6 +572,7 @@ mod tests {
         let config = Config {
             theme,
             tab_width: 4,
+            show_line_numbers: true,
         };
         let diff_view = DiffView::new(diff, config);
         assert_eq!(diff_view.scroll_position, 0);
@@ -471,6 +585,7 @@ mod tests {
         let config = Config {
             theme,
             tab_width: 4,
+            show_line_numbers: true,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 2; // Small viewport to enable scrolling
@@ -496,6 +611,7 @@ mod tests {
         let config = Config {
             theme,
             tab_width: 4,
+            show_line_numbers: true,
         };
         let diff_view = DiffView::new(diff, config);
         match &diff_view.content {
@@ -511,6 +627,7 @@ mod tests {
         let config = Config {
             theme,
             tab_width: 4,
+            show_line_numbers: true,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
@@ -534,6 +651,7 @@ mod tests {
         let config = Config {
             theme,
             tab_width: 4,
+            show_line_numbers: true,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
@@ -631,6 +749,7 @@ mod tests {
         let config = Config {
             theme,
             tab_width: 4,
+            show_line_numbers: true,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
@@ -663,6 +782,7 @@ mod tests {
         let config = Config {
             theme: theme.clone(),
             tab_width: 4,
+            show_line_numbers: true,
         };
         let single_hunk_view = DiffView::new(single_hunk_diff, config.clone());
         assert_eq!(single_hunk_view.get_hunk_count(), 1);
@@ -680,5 +800,63 @@ mod tests {
         let empty_view = DiffView::new(empty_diff, config);
         assert_eq!(empty_view.get_hunk_count(), 0);
         assert_eq!(empty_view.get_current_hunk_index(), None);
+    }
+
+    #[test]
+    fn test_line_numbers_toggle_and_gutter() {
+        let diff = create_test_diff();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let mut config = Config {
+            theme: theme.clone(),
+            tab_width: 4,
+            show_line_numbers: true,
+        };
+        let diff_view = DiffView::new(diff.clone(), config.clone());
+
+        let lines_with_numbers = diff_view.generate_diff_lines(&diff);
+        // First line after header belongs to the current hunk
+        let first_content_line = &lines_with_numbers[1];
+        assert_eq!(first_content_line.spans.len(), 7);
+        assert_eq!(first_content_line.spans[0].content, "1");
+        assert_eq!(first_content_line.spans[2].content, "1");
+        assert_eq!(first_content_line.spans[4].content, "|");
+
+        config.show_line_numbers = false;
+        let diff_view_no_numbers = DiffView::new(diff.clone(), config);
+        let lines_without_numbers = diff_view_no_numbers.generate_diff_lines(&diff);
+        let first_line_without_numbers = &lines_without_numbers[1];
+        assert_eq!(first_line_without_numbers.spans.len(), 3);
+        assert_eq!(first_line_without_numbers.spans[0].content, "|");
+    }
+
+    #[test]
+    fn test_current_hunk_highlight_applies_to_lines() {
+        let diff = create_multi_hunk_diff();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme: theme.clone(),
+            tab_width: 4,
+            show_line_numbers: true,
+        };
+        let mut diff_view = DiffView::new(diff.clone(), config.clone());
+
+        let lines = diff_view.generate_diff_lines(&diff);
+        let first_hunk_line = &lines[1];
+        assert_eq!(
+            first_hunk_line.spans[0].style.bg,
+            Some(config.theme.diff_hunk_highlight)
+        );
+
+        diff_view.current_hunk_index = Some(1);
+        let lines_second_hunk_selected = diff_view.generate_diff_lines(&diff);
+        let first_hunk_line_after_switch = &lines_second_hunk_selected[1];
+        assert_eq!(first_hunk_line_after_switch.spans[0].style.bg, None);
+
+        // Second hunk header sits at index 3, so the first content line is at index 4
+        let second_hunk_line = &lines_second_hunk_selected[4];
+        assert_eq!(
+            second_hunk_line.spans[0].style.bg,
+            Some(config.theme.diff_hunk_highlight)
+        );
     }
 }
