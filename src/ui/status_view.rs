@@ -420,13 +420,17 @@ impl<'a> StatusView<'a> {
             // Hunk header with indentation and selection highlight
             let header_index = items.len();
             let is_selected = matches!(cursor, Some(SelectionCursor::Hunk { section: s, file_index: fi, hunk_index: hi }) if s == section && fi == file_index && hi == idx);
-            let header_style = if is_selected {
+            let mut header_style = if is_selected {
                 self.config.theme.diff_hunk_header_focused
             } else {
                 self.config.theme.diff_hunk_header
             };
 
+            // Apply subtle background color for selected hunk if available
             if is_selected {
+                if let Some(bg_color) = self.config.theme.selected_hunk_bg {
+                    header_style = header_style.bg(bg_color);
+                }
                 render_ctx.ensure_visible(header_index);
                 render_ctx.select_index(header_index);
             }
@@ -456,9 +460,17 @@ impl<'a> StatusView<'a> {
                     // Expand tabs in the line content
                     let expanded_content = self.expand_tabs(&line.content);
 
+                    // Apply subtle background to diff lines in selected hunk
+                    let mut line_style = Style::default().fg(color);
+                    if is_selected
+                        && let Some(bg_color) = self.config.theme.selected_hunk_bg
+                    {
+                        line_style = line_style.bg(bg_color);
+                    }
+
                     items.push(ListItem::new(Line::from(Span::styled(
                         format!("      {}{}", prefix, expanded_content),
-                        Style::default().fg(color),
+                        line_style,
                     ))));
                 }
             }

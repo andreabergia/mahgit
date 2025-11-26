@@ -9,6 +9,7 @@ pub struct Theme {
     pub conflicted: Color,
     pub selected_fg: Color,
     pub selected_bg: Color,
+    pub selected_hunk_bg: Option<Color>,
     pub section_header: Style,
     pub diff_context: Color,
     pub diff_hunk_header: Style,
@@ -39,6 +40,7 @@ impl Theme {
             conflicted: Color::Yellow,
             selected_fg: Color::White,
             selected_bg: Color::DarkGray,
+            selected_hunk_bg: None,
             section_header: Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -64,6 +66,7 @@ impl Theme {
             conflicted: Color::Yellow,
             selected_fg: Color::Black,
             selected_bg: Color::LightBlue,
+            selected_hunk_bg: None,
             section_header: Style::default()
                 .fg(Color::Blue)
                 .add_modifier(Modifier::BOLD),
@@ -83,12 +86,13 @@ impl Theme {
     /// GitHub Dark - modern 24-bit RGB colors matching GitHub's dark theme
     fn github_dark() -> Self {
         Self {
-            staged: Color::Rgb(63, 185, 80),        // #3FB950
-            unstaged: Color::Rgb(248, 81, 73),      // #F85149
-            untracked: Color::Rgb(188, 140, 255),   // #BC8CFF
-            conflicted: Color::Rgb(219, 171, 9),    // #DBAB09
-            selected_fg: Color::Rgb(201, 209, 217), // #C9D1D9
-            selected_bg: Color::Rgb(45, 51, 59),    // #2D333B
+            staged: Color::Rgb(63, 185, 80),                // #3FB950
+            unstaged: Color::Rgb(248, 81, 73),              // #F85149
+            untracked: Color::Rgb(188, 140, 255),           // #BC8CFF
+            conflicted: Color::Rgb(219, 171, 9),            // #DBAB09
+            selected_fg: Color::Rgb(201, 209, 217),         // #C9D1D9
+            selected_bg: Color::Rgb(45, 51, 59),            // #2D333B
+            selected_hunk_bg: Some(Color::Rgb(35, 39, 46)), // #23272E - subtle darker than selected_bg
             section_header: Style::default()
                 .fg(Color::Rgb(127, 219, 202)) // #7FDBCA
                 .add_modifier(Modifier::BOLD),
@@ -108,12 +112,13 @@ impl Theme {
     /// GitHub Light - light variant matching GitHub's light theme
     fn github_light() -> Self {
         Self {
-            staged: Color::Rgb(31, 136, 61),        // #1F883D
-            unstaged: Color::Rgb(207, 34, 46),      // #CF222E
-            untracked: Color::Rgb(130, 80, 223),    // #8250DF
-            conflicted: Color::Rgb(191, 135, 0),    // #BF8700
-            selected_fg: Color::Rgb(36, 41, 47),    // #24292F
-            selected_bg: Color::Rgb(208, 215, 222), // #D0D7DE
+            staged: Color::Rgb(31, 136, 61),                   // #1F883D
+            unstaged: Color::Rgb(207, 34, 46),                 // #CF222E
+            untracked: Color::Rgb(130, 80, 223),               // #8250DF
+            conflicted: Color::Rgb(191, 135, 0),               // #BF8700
+            selected_fg: Color::Rgb(36, 41, 47),               // #24292F
+            selected_bg: Color::Rgb(208, 215, 222),            // #D0D7DE
+            selected_hunk_bg: Some(Color::Rgb(234, 238, 242)), // #EAEEF2 - subtle lighter than selected_bg
             section_header: Style::default()
                 .fg(Color::Rgb(9, 105, 218)) // #0969DA
                 .add_modifier(Modifier::BOLD),
