@@ -1,3 +1,4 @@
+pub mod config;
 pub mod diff;
 pub mod operations;
 pub mod repository;
