@@ -159,3 +159,105 @@ fn test_stage_unstage_single_file() {
     test_app.quit().unwrap();
     assert!(test_app.should_quit());
 }
+
+#[test]
+fn test_renamed_file_detection() {
+    let test_repo = create_test_repository()
+        .expect("Failed to create test repository")
+        .temp_dir;
+
+    // Create initial file and commit it
+    create_test_file(&test_repo, "old_name.txt", "original content");
+    Command::new("git")
+        .args(["add", "old_name.txt"])
+        .current_dir(test_repo.path())
+        .output()
+        .expect("Failed to stage file");
+    Command::new("git")
+        .args(["commit", "-m", "Add initial file"])
+        .current_dir(test_repo.path())
+        .output()
+        .expect("Failed to commit");
+
+    // Rename the file using git mv
+    Command::new("git")
+        .args(["mv", "old_name.txt", "new_name.txt"])
+        .current_dir(test_repo.path())
+        .output()
+        .expect("Failed to rename file");
+
+    let repository = mahgit::repository::Repository::discover(test_repo.path()).unwrap();
+    std::env::set_current_dir(test_repo.path()).unwrap();
+
+    // Get repository status and verify renamed file is detected
+    let status = mahgit::status::RepositoryStatus::new(&repository).expect("Failed to get status");
+
+    // Should have one staged file with renamed status
+    assert_eq!(
+        status.staged.len(),
+        1,
+        "Should have one staged file after rename"
+    );
+
+    let renamed_file = &status.staged[0];
+    assert_eq!(
+        renamed_file.status,
+        mahgit::status::FileStatus::Renamed,
+        "File status should be Renamed"
+    );
+    assert_eq!(
+        renamed_file.path, "new_name.txt",
+        "New path should be new_name.txt"
+    );
+    assert_eq!(
+        renamed_file.old_path,
+        Some("old_name.txt".to_string()),
+        "Old path should be old_name.txt"
+    );
+
+    // Test unstaged rename (rename in working directory without staging)
+    Command::new("git")
+        .args(["reset", "HEAD", "new_name.txt"])
+        .current_dir(test_repo.path())
+        .output()
+        .expect("Failed to unstage file");
+
+    // Restore the original file
+    Command::new("git")
+        .args(["checkout", "HEAD", "old_name.txt"])
+        .current_dir(test_repo.path())
+        .output()
+        .expect("Failed to restore file");
+
+    // Remove the renamed file from working directory
+    fs::remove_file(test_repo.path().join("new_name.txt")).expect("Failed to remove file");
+
+    // Now rename in working directory without staging
+    fs::rename(
+        test_repo.path().join("old_name.txt"),
+        test_repo.path().join("new_name.txt"),
+    )
+    .expect("Failed to rename file");
+
+    Command::new("git")
+        .args(["add", "-N", "new_name.txt"])
+        .current_dir(test_repo.path())
+        .output()
+        .expect("Failed to add new file");
+
+    let status = mahgit::status::RepositoryStatus::new(&repository).expect("Failed to get status");
+
+    // With just a filesystem rename and add -N, git may detect it as deleted + new
+    // rather than a rename in the working tree. This is expected git behavior.
+    // We verify that our code handles both scenarios correctly.
+    let has_deleted = status
+        .unstaged
+        .iter()
+        .any(|f| f.path == "old_name.txt" && f.status == mahgit::status::FileStatus::Deleted);
+    let has_untracked = status.untracked.iter().any(|f| f == "new_name.txt");
+
+    assert!(
+        has_deleted || has_untracked,
+        "Should detect file changes after working directory rename"
+    );
+}

@@ -28,11 +28,24 @@ impl fmt::Display for FileStatus {
 pub struct FileEntry {
     pub path: String,
     pub status: FileStatus,
+    pub old_path: Option<String>,
 }
 
 impl FileEntry {
     pub fn new(path: String, status: FileStatus) -> Self {
-        Self { path, status }
+        Self {
+            path,
+            status,
+            old_path: None,
+        }
+    }
+
+    pub fn new_renamed(old_path: String, new_path: String) -> Self {
+        Self {
+            path: new_path,
+            status: FileStatus::Renamed,
+            old_path: Some(old_path),
+        }
     }
 }
 
@@ -75,7 +88,25 @@ impl RepositoryStatus {
                 } else if status.contains(Status::INDEX_DELETED) {
                     staged.push(FileEntry::new(path.clone(), FileStatus::Deleted));
                 } else if status.contains(Status::INDEX_RENAMED) {
-                    staged.push(FileEntry::new(path.clone(), FileStatus::Renamed));
+                    // Extract both old and new paths from head_to_index delta
+                    if let Some(delta) = entry.head_to_index() {
+                        let old_path = delta
+                            .old_file()
+                            .path()
+                            .and_then(|p| p.to_str())
+                            .unwrap_or("<invalid utf-8>")
+                            .to_string();
+                        let new_path = delta
+                            .new_file()
+                            .path()
+                            .and_then(|p| p.to_str())
+                            .unwrap_or("<invalid utf-8>")
+                            .to_string();
+                        staged.push(FileEntry::new_renamed(old_path, new_path));
+                    } else {
+                        // Fallback if delta is not available
+                        staged.push(FileEntry::new(path.clone(), FileStatus::Renamed));
+                    }
                 } else if status.contains(Status::INDEX_TYPECHANGE) {
                     staged.push(FileEntry::new(path.clone(), FileStatus::Typechange));
                 }
@@ -86,7 +117,25 @@ impl RepositoryStatus {
                 } else if status.contains(Status::WT_DELETED) {
                     unstaged.push(FileEntry::new(path.clone(), FileStatus::Deleted));
                 } else if status.contains(Status::WT_RENAMED) {
-                    unstaged.push(FileEntry::new(path.clone(), FileStatus::Renamed));
+                    // Extract both old and new paths from index_to_workdir delta
+                    if let Some(delta) = entry.index_to_workdir() {
+                        let old_path = delta
+                            .old_file()
+                            .path()
+                            .and_then(|p| p.to_str())
+                            .unwrap_or("<invalid utf-8>")
+                            .to_string();
+                        let new_path = delta
+                            .new_file()
+                            .path()
+                            .and_then(|p| p.to_str())
+                            .unwrap_or("<invalid utf-8>")
+                            .to_string();
+                        unstaged.push(FileEntry::new_renamed(old_path, new_path));
+                    } else {
+                        // Fallback if delta is not available
+                        unstaged.push(FileEntry::new(path.clone(), FileStatus::Renamed));
+                    }
                 } else if status.contains(Status::WT_TYPECHANGE) {
                     unstaged.push(FileEntry::new(path.clone(), FileStatus::Typechange));
                 }

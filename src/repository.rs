@@ -62,8 +62,13 @@ impl Repository {
     }
 
     pub fn get_statuses(&self) -> Result<git2::Statuses<'_>, RepositoryError> {
+        let mut opts = git2::StatusOptions::new();
+        opts.include_untracked(true);
+        opts.renames_head_to_index(true);
+        opts.renames_index_to_workdir(true);
+
         self.git_repo
-            .statuses(None)
+            .statuses(Some(&mut opts))
             .map_err(|e| RepositoryError::Other(e.message().to_string()))
     }
 

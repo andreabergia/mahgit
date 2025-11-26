@@ -216,10 +216,15 @@ impl<'a> StatusView<'a> {
                 });
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(format!("{} ", icon), icon_style));
-                spans.push(Span::styled(
-                    format!("{} {}", entry.status, entry.path),
-                    style,
-                ));
+
+                // Format renamed files as "renamed: old_path -> new_path"
+                let file_display = if let Some(old_path) = &entry.old_path {
+                    format!("{} {} -> {}", entry.status, old_path, entry.path)
+                } else {
+                    format!("{} {}", entry.status, entry.path)
+                };
+
+                spans.push(Span::styled(file_display, style));
 
                 items.push(ListItem::new(Line::from(spans)));
 
