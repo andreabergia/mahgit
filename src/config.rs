@@ -43,39 +43,48 @@ pub enum ConfigError {
     UnknownTheme(String),
 }
 
-fn get_config_path() -> Result<PathBuf, ConfigError> {
-    // Try platform-specific config directory first (respects OS conventions)
-    if let Some(config_dir) = dirs::config_dir() {
-        let platform_path = config_dir.join("mahgit").join("config.toml");
-        if platform_path.exists() {
-            return Ok(platform_path);
+impl Config {
+    /// Returns all configuration file locations that are checked on this platform.
+    /// The list is ordered by priority and de-duplicated (Linux will only show one path).
+    pub fn config_paths() -> Result<Vec<PathBuf>, ConfigError> {
+        let mut paths = Vec::new();
+
+        // Try platform-specific config directory first (respects OS conventions)
+        if let Some(config_dir) = dirs::config_dir() {
+            let platform_path = config_dir.join("mahgit").join("config.toml");
+            paths.push(platform_path);
         }
+
+        // Fall back to XDG-style ~/.config (more intuitive, cross-platform consistent)
+        let home = dirs::home_dir().ok_or(ConfigError::NoConfigDir)?;
+        let xdg_path = home.join(".config").join("mahgit").join("config.toml");
+
+        // Always include the XDG path; de-duplicate if it matches the platform path
+        if paths.last() != Some(&xdg_path) {
+            paths.push(xdg_path);
+        }
+
+        Ok(paths)
     }
 
-    // Fall back to XDG-style ~/.config (more intuitive, cross-platform consistent)
-    let home = dirs::home_dir().ok_or(ConfigError::NoConfigDir)?;
-    let xdg_path = home.join(".config").join("mahgit").join("config.toml");
-
-    // Return the XDG path even if it doesn't exist yet (for creation)
-    Ok(xdg_path)
-}
-
-impl Config {
     pub fn load() -> Result<Self, ConfigError> {
-        let config_path = get_config_path()?;
+        let mut config_file = ConfigFile::default();
 
-        // Missing config file is OK - use defaults
-        let config_file = if !config_path.exists() {
-            ConfigFile::default()
-        } else {
-            // Read and parse config file
-            let contents = std::fs::read_to_string(&config_path)
-                .map_err(|e| ConfigError::ReadError(config_path.clone(), e))?;
+        for path in Self::config_paths()? {
+            if !path.exists() {
+                continue;
+            }
 
-            // Parse TOML - serde will merge with defaults automatically
-            toml::from_str(&contents)
-                .map_err(|e| ConfigError::ParseError(config_path.clone(), e))?
-        };
+            let contents = std::fs::read_to_string(&path)
+                .map_err(|e| ConfigError::ReadError(path.clone(), e))?;
+
+            let parsed: ConfigFile =
+                toml::from_str(&contents).map_err(|e| ConfigError::ParseError(path.clone(), e))?;
+
+            // Later files override earlier ones
+            config_file.theme = parsed.theme;
+            config_file.tab_width = parsed.tab_width;
+        }
 
         // Validate theme exists and resolve it
         let theme = Theme::from_name(&config_file.theme)

@@ -6,15 +6,23 @@ pub mod status;
 pub mod theme;
 pub mod ui;
 
-use config::Config;
+use config::{Config, ConfigError};
 use repository::{Repository, RepositoryError};
 use status::RepositoryStatus;
 use std::{env, process};
 use ui::{App, console};
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        print_help();
+        return;
+    }
+
+    let use_console = args.iter().any(|arg| arg == "--console");
     let config = load_config();
-    if let Err(e) = run(config) {
+    if let Err(e) = run(config, use_console) {
         eprintln!("Error: {}", e);
         process::exit(match e {
             RepositoryError::NotFound | RepositoryError::NotARepository => 128,
@@ -24,6 +32,32 @@ fn main() {
             RepositoryError::IoError(_) => 1,
             RepositoryError::Other(_) => 1,
         });
+    }
+}
+
+fn print_help() {
+    let config_locations = match Config::config_paths() {
+        Ok(paths) => paths
+            .into_iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>(),
+        Err(ConfigError::NoConfigDir) => {
+            vec!["Unavailable (could not determine config directory)".to_string()]
+        }
+        Err(err) => vec![format!("Unavailable ({})", err)],
+    };
+
+    println!("mahgit - terminal Git interface inspired by Magit");
+    println!();
+    println!("Usage: mahgit [--console] [--help]");
+    println!();
+    println!("Options:");
+    println!("  --help     Show this help message");
+    println!("  --console  Print repository status to stdout instead of launching the UI");
+    println!();
+    println!("Configuration file paths:");
+    for path in config_locations {
+        println!("  {}", path);
     }
 }
 
@@ -37,10 +71,7 @@ fn load_config() -> Config {
     }
 }
 
-fn run(config: Config) -> Result<(), RepositoryError> {
-    let args: Vec<String> = env::args().collect();
-    let use_console = args.iter().any(|arg| arg == "--console");
-
+fn run(config: Config, use_console: bool) -> Result<(), RepositoryError> {
     let repo = Repository::discover(".")?;
     let status = RepositoryStatus::new(&repo)?;
 
