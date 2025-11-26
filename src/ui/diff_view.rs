@@ -4,7 +4,7 @@ use crate::diff::{Diff, DiffLine, LineType};
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
@@ -66,7 +66,7 @@ impl DiffView {
 
         let text = Text::from(vec![Line::from(Span::styled(
             "Binary file - cannot display diff",
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(self.config.theme.diff_no_newline),
         ))]);
 
         let paragraph = Paragraph::new(text).block(block);
@@ -87,19 +87,24 @@ impl DiffView {
         let (message, color) = match error {
             DiffError::BinaryFile(_) => (
                 "Binary file - cannot display diff".to_string(),
-                Color::Yellow,
+                self.config.theme.diff_no_newline,
             ),
             DiffError::FileTooLarge(size, _) => (
                 format!("File too large ({} bytes) - cannot display diff", size),
-                Color::Red,
+                self.config.theme.unstaged,
             ),
             DiffError::TerminalCompatibility(msg) => (
                 format!("Terminal compatibility issue: {}", msg),
-                Color::Magenta,
+                self.config.theme.untracked,
             ),
-            DiffError::FileNotFound(_) => ("File not found".to_string(), Color::Red),
-            DiffError::Git(git_err) => (format!("Git error: {}", git_err), Color::Red),
-            DiffError::Io(io_err) => (format!("I/O error: {}", io_err), Color::Red),
+            DiffError::FileNotFound(_) => {
+                ("File not found".to_string(), self.config.theme.unstaged)
+            }
+            DiffError::Git(git_err) => (
+                format!("Git error: {}", git_err),
+                self.config.theme.unstaged,
+            ),
+            DiffError::Io(io_err) => (format!("I/O error: {}", io_err), self.config.theme.unstaged),
         };
 
         let text = Text::from(vec![Line::from(Span::styled(
@@ -153,9 +158,9 @@ impl DiffView {
 
             // Add hunk header with highlighting if current
             let header_style = if is_current_hunk {
-                Style::default().fg(Color::Cyan).bg(Color::DarkGray)
+                self.config.theme.diff_hunk_header_focused
             } else {
-                Style::default().fg(Color::Cyan)
+                self.config.theme.diff_hunk_header
             };
 
             lines.push(Line::from(Span::styled(
@@ -175,10 +180,10 @@ impl DiffView {
 
     fn format_diff_line(&self, diff_line: &DiffLine) -> Line<'static> {
         let (prefix, color) = match diff_line.line_type {
-            LineType::Addition => ("+", Color::Green),
-            LineType::Deletion => ("-", Color::Red),
-            LineType::Context => (" ", Color::White),
-            LineType::NoNewlineEOF => ("\\", Color::Yellow),
+            LineType::Addition => ("+", self.config.theme.staged),
+            LineType::Deletion => ("-", self.config.theme.unstaged),
+            LineType::Context => (" ", self.config.theme.diff_context),
+            LineType::NoNewlineEOF => ("\\", self.config.theme.diff_no_newline),
         };
 
         // Expand tabs in the line content
@@ -450,7 +455,11 @@ mod tests {
     #[test]
     fn test_diff_view_creation() {
         let diff = create_test_diff();
-        let config = Config::default();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+        };
         let diff_view = DiffView::new(diff, config);
         assert_eq!(diff_view.scroll_position, 0);
     }
@@ -458,7 +467,11 @@ mod tests {
     #[test]
     fn test_scrolling() {
         let diff = create_test_diff();
-        let config = Config::default();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+        };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 2; // Small viewport to enable scrolling
 
@@ -479,7 +492,11 @@ mod tests {
     fn test_binary_diff() {
         let mut diff = create_test_diff();
         diff.binary = true;
-        let config = Config::default();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+        };
         let diff_view = DiffView::new(diff, config);
         match &diff_view.content {
             DiffViewContent::Success(diff) => assert!(diff.binary),
@@ -490,7 +507,11 @@ mod tests {
     #[test]
     fn test_hunk_navigation() {
         let diff = create_test_diff();
-        let config = Config::default();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+        };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
 
@@ -509,7 +530,11 @@ mod tests {
     #[test]
     fn test_arrow_key_navigation() {
         let diff = create_test_diff();
-        let config = Config::default();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+        };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
 
@@ -602,7 +627,11 @@ mod tests {
     #[test]
     fn test_multi_hunk_navigation() {
         let diff = create_multi_hunk_diff();
-        let config = Config::default();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+        };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
 
@@ -630,7 +659,11 @@ mod tests {
     #[test]
     fn test_hunk_count() {
         let single_hunk_diff = create_test_diff();
-        let config = Config::default();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme: theme.clone(),
+            tab_width: 4,
+        };
         let single_hunk_view = DiffView::new(single_hunk_diff, config.clone());
         assert_eq!(single_hunk_view.get_hunk_count(), 1);
 

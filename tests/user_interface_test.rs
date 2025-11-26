@@ -26,7 +26,11 @@ fn test_help_window() {
         .expect("Failed to create test repository")
         .repository;
     let status = RepositoryStatus::empty();
-    let config = Config::default();
+    let theme = mahgit::theme::Theme::from_name("gruvbox-dark").unwrap();
+    let config = Config {
+        theme,
+        tab_width: 4,
+    };
     let mut app = App::new(repository, status, config);
 
     let help_key = create_key_event('?');

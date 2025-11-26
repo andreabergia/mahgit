@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::diff::{Diff, LineType};
 use crate::status::{FileEntry, RepositoryStatus};
 use crate::ui::navigation::{FileDiffKey, NavigationState, SelectionCursor, StatusSection};
@@ -45,19 +46,19 @@ impl<'a> ListRenderContext<'a> {
 pub struct StatusView<'a> {
     status: &'a RepositoryStatus,
     navigation: &'a NavigationState,
-    tab_width: usize,
+    config: &'a Config,
 }
 
 impl<'a> StatusView<'a> {
     pub fn new(
         status: &'a RepositoryStatus,
         navigation: &'a NavigationState,
-        tab_width: usize,
+        config: &'a Config,
     ) -> Self {
         Self {
             status,
             navigation,
-            tab_width,
+            config,
         }
     }
 
@@ -184,9 +185,7 @@ impl<'a> StatusView<'a> {
             ICON_EXPANDED
         };
         let section_header = format!("{} {} ({})", collapse_icon, header, entries.len());
-        let header_style = Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD);
+        let header_style = self.config.theme.section_header;
 
         items.push(ListItem::new(Line::from(Span::styled(
             section_header,
@@ -207,8 +206,8 @@ impl<'a> StatusView<'a> {
 
                 let style = if is_selected {
                     Style::default()
-                        .bg(Color::DarkGray)
-                        .fg(Color::White)
+                        .bg(self.config.theme.selected_bg)
+                        .fg(self.config.theme.selected_fg)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     self.get_file_style(section)
@@ -219,7 +218,15 @@ impl<'a> StatusView<'a> {
 
                 let mut spans = Vec::new();
                 spans.push(if is_selected {
-                    Span::styled("> ", Style::default().fg(Color::Yellow))
+                    Span::styled(
+                        "> ",
+                        Style::default().fg(self
+                            .config
+                            .theme
+                            .diff_hunk_header_focused
+                            .fg
+                            .unwrap_or(Color::Yellow)),
+                    )
                 } else {
                     Span::raw("  ")
                 });
@@ -250,7 +257,7 @@ impl<'a> StatusView<'a> {
                         items.push(ListItem::new(Line::from(Span::styled(
                             "    Loading diff...",
                             Style::default()
-                                .fg(Color::Gray)
+                                .fg(self.config.theme.diff_no_newline)
                                 .add_modifier(Modifier::ITALIC),
                         ))));
                     }
@@ -281,9 +288,7 @@ impl<'a> StatusView<'a> {
             ICON_EXPANDED
         };
         let section_header = format!("{} {} ({})", collapse_icon, header, files.len());
-        let header_style = Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD);
+        let header_style = self.config.theme.section_header;
 
         items.push(ListItem::new(Line::from(Span::styled(
             section_header,
@@ -311,8 +316,8 @@ impl<'a> StatusView<'a> {
 
                 let style = if is_selected {
                     Style::default()
-                        .bg(Color::DarkGray)
-                        .fg(Color::White)
+                        .bg(self.config.theme.selected_bg)
+                        .fg(self.config.theme.selected_fg)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     self.get_file_style(section)
@@ -324,7 +329,15 @@ impl<'a> StatusView<'a> {
 
                 let mut spans = Vec::new();
                 spans.push(if is_selected {
-                    Span::styled("> ", Style::default().fg(Color::Yellow))
+                    Span::styled(
+                        "> ",
+                        Style::default().fg(self
+                            .config
+                            .theme
+                            .diff_hunk_header_focused
+                            .fg
+                            .unwrap_or(Color::Yellow)),
+                    )
                 } else {
                     Span::raw("  ")
                 });
@@ -350,7 +363,7 @@ impl<'a> StatusView<'a> {
                         items.push(ListItem::new(Line::from(Span::styled(
                             "    Loading diff...",
                             Style::default()
-                                .fg(Color::Gray)
+                                .fg(self.config.theme.diff_no_newline)
                                 .add_modifier(Modifier::ITALIC),
                         ))));
                     }
@@ -372,10 +385,10 @@ impl<'a> StatusView<'a> {
 
     fn get_file_style(&self, section: StatusSection) -> Style {
         match section {
-            StatusSection::Staged => Style::default().fg(Color::Green),
-            StatusSection::Unstaged => Style::default().fg(Color::Red),
-            StatusSection::Untracked => Style::default().fg(Color::Magenta),
-            StatusSection::Conflicted => Style::default().fg(Color::Yellow),
+            StatusSection::Staged => Style::default().fg(self.config.theme.staged),
+            StatusSection::Unstaged => Style::default().fg(self.config.theme.unstaged),
+            StatusSection::Untracked => Style::default().fg(self.config.theme.untracked),
+            StatusSection::Conflicted => Style::default().fg(self.config.theme.conflicted),
         }
     }
 
@@ -393,7 +406,7 @@ impl<'a> StatusView<'a> {
             items.push(ListItem::new(Line::from(Span::styled(
                 "    Binary file (not shown)",
                 Style::default()
-                    .fg(Color::Gray)
+                    .fg(self.config.theme.diff_no_newline)
                     .add_modifier(Modifier::ITALIC),
             ))));
             return;
@@ -408,9 +421,9 @@ impl<'a> StatusView<'a> {
             let header_index = items.len();
             let is_selected = matches!(cursor, Some(SelectionCursor::Hunk { section: s, file_index: fi, hunk_index: hi }) if s == section && fi == file_index && hi == idx);
             let header_style = if is_selected {
-                Style::default().fg(Color::Cyan).bg(Color::DarkGray)
+                self.config.theme.diff_hunk_header_focused
             } else {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM)
+                self.config.theme.diff_hunk_header
             };
 
             if is_selected {
@@ -434,10 +447,10 @@ impl<'a> StatusView<'a> {
                 // Diff lines with deeper indentation
                 for line in &hunk.lines {
                     let (prefix, color) = match line.line_type {
-                        LineType::Addition => ("+", Color::Green),
-                        LineType::Deletion => ("-", Color::Red),
-                        LineType::Context => (" ", Color::White),
-                        LineType::NoNewlineEOF => ("\\", Color::Yellow),
+                        LineType::Addition => ("+", self.config.theme.staged),
+                        LineType::Deletion => ("-", self.config.theme.unstaged),
+                        LineType::Context => (" ", self.config.theme.diff_context),
+                        LineType::NoNewlineEOF => ("\\", self.config.theme.diff_no_newline),
                     };
 
                     // Expand tabs in the line content
@@ -461,13 +474,20 @@ impl<'a> StatusView<'a> {
     fn inline_diff_indicator(&self, key: &FileDiffKey, is_selected: bool) -> (&'static str, Style) {
         let expanded = self.navigation.is_file_diff_expanded(key);
         let mut icon_style = if expanded {
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(self
+                .config
+                .theme
+                .diff_hunk_header_focused
+                .fg
+                .unwrap_or(Color::Yellow))
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(self.config.theme.diff_no_newline)
         };
 
         if is_selected {
-            icon_style = icon_style.bg(Color::DarkGray).add_modifier(Modifier::BOLD);
+            icon_style = icon_style
+                .bg(self.config.theme.selected_bg)
+                .add_modifier(Modifier::BOLD);
         }
 
         let icon = if expanded {
@@ -480,6 +500,6 @@ impl<'a> StatusView<'a> {
     }
 
     fn expand_tabs(&self, line: &str) -> String {
-        crate::config::expand_tabs_with_width(line, self.tab_width)
+        crate::config::expand_tabs_with_width(line, self.config.tab_width)
     }
 }

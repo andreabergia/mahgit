@@ -1,20 +1,31 @@
+use crate::theme::Theme;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// ConfigFile represents the structure of the configuration file on disk.
+/// This is what gets deserialized from TOML.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub struct Config {
-    pub theme: String,
-    pub tab_width: usize,
+struct ConfigFile {
+    theme: String,
+    tab_width: usize,
 }
 
-impl Default for Config {
+impl Default for ConfigFile {
     fn default() -> Self {
         Self {
             theme: "gruvbox-dark".to_string(),
             tab_width: 4,
         }
     }
+}
+
+/// Config is the runtime configuration object that gets passed around.
+/// It contains the resolved Theme object and other configuration values.
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub theme: Theme,
+    pub tab_width: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -27,11 +38,26 @@ pub enum ConfigError {
 
     #[error("Failed to parse config file {0}: {1}")]
     ParseError(PathBuf, toml::de::Error),
+
+    #[error("Unknown theme: {0}")]
+    UnknownTheme(String),
 }
 
 fn get_config_path() -> Result<PathBuf, ConfigError> {
-    let config_dir = dirs::config_dir().ok_or(ConfigError::NoConfigDir)?;
-    Ok(config_dir.join("mahgit").join("config.toml"))
+    // Try platform-specific config directory first (respects OS conventions)
+    if let Some(config_dir) = dirs::config_dir() {
+        let platform_path = config_dir.join("mahgit").join("config.toml");
+        if platform_path.exists() {
+            return Ok(platform_path);
+        }
+    }
+
+    // Fall back to XDG-style ~/.config (more intuitive, cross-platform consistent)
+    let home = dirs::home_dir().ok_or(ConfigError::NoConfigDir)?;
+    let xdg_path = home.join(".config").join("mahgit").join("config.toml");
+
+    // Return the XDG path even if it doesn't exist yet (for creation)
+    Ok(xdg_path)
 }
 
 impl Config {
@@ -39,19 +65,26 @@ impl Config {
         let config_path = get_config_path()?;
 
         // Missing config file is OK - use defaults
-        if !config_path.exists() {
-            return Ok(Self::default());
-        }
+        let config_file = if !config_path.exists() {
+            ConfigFile::default()
+        } else {
+            // Read and parse config file
+            let contents = std::fs::read_to_string(&config_path)
+                .map_err(|e| ConfigError::ReadError(config_path.clone(), e))?;
 
-        // Read and parse config file
-        let contents = std::fs::read_to_string(&config_path)
-            .map_err(|e| ConfigError::ReadError(config_path.clone(), e))?;
+            // Parse TOML - serde will merge with defaults automatically
+            toml::from_str(&contents)
+                .map_err(|e| ConfigError::ParseError(config_path.clone(), e))?
+        };
 
-        // Parse TOML - serde will merge with defaults automatically
-        let config: Config = toml::from_str(&contents)
-            .map_err(|e| ConfigError::ParseError(config_path.clone(), e))?;
+        // Validate theme exists and resolve it
+        let theme = Theme::from_name(&config_file.theme)
+            .ok_or_else(|| ConfigError::UnknownTheme(config_file.theme.clone()))?;
 
-        Ok(config)
+        Ok(Config {
+            theme,
+            tab_width: config_file.tab_width,
+        })
     }
 
     /// Expands tabs in a string to spaces based on the configured tab_width.
@@ -138,22 +171,24 @@ mod tests {
     }
 
     #[test]
-    fn test_config_default() {
-        let config = Config::default();
-        assert_eq!(config.theme, "gruvbox-dark");
-        assert_eq!(config.tab_width, 4);
+    fn test_config_file_default() {
+        let config_file = ConfigFile::default();
+        assert_eq!(config_file.theme, "gruvbox-dark");
+        assert_eq!(config_file.tab_width, 4);
     }
 
     #[test]
     fn test_config_expand_tabs() {
+        let theme = Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme: "gruvbox-dark".to_string(),
+            theme,
             tab_width: 4,
         };
         assert_eq!(config.expand_tabs("\thello"), "    hello");
 
+        let theme_8 = Theme::from_name("gruvbox-dark").unwrap();
         let config_width_8 = Config {
-            theme: "gruvbox-dark".to_string(),
+            theme: theme_8,
             tab_width: 8,
         };
         assert_eq!(config_width_8.expand_tabs("\thello"), "        hello");

@@ -18,9 +18,17 @@ This document describes the design and implementation plan for mahgit's configur
 
 ### Location
 
-Platform-specific paths using the `dirs` crate:
-- **Unix/Linux/macOS:** `~/.config/mahgit/config.toml`
+Configuration file paths with fallback priority:
+
+**Primary (XDG-style, recommended):**
+- **All platforms:** `~/.config/mahgit/config.toml`
+
+**Fallback (platform-specific):**
+- **macOS:** `~/Library/Application Support/mahgit/config.toml`
+- **Linux:** `~/.config/mahgit/config.toml` (same as primary)
 - **Windows:** `%APPDATA%\mahgit\config.toml` (e.g., `C:\Users\Username\AppData\Roaming\mahgit\config.toml`)
+
+The application will check the platform-specific location first (if it exists), then fall back to the XDG-style `~/.config` path. This provides flexibility while preferring the more intuitive cross-platform standard.
 
 ### Format: TOML
 

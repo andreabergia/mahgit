@@ -22,7 +22,11 @@ impl TestApp {
         // Make sure to load the status from the repository
         status.reload(&repository)?;
 
-        let config = Config::default();
+        let theme = mahgit::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+        };
         let app = App::new(repository, status, config);
 
         Ok(Self { app, terminal })

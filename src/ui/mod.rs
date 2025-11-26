@@ -607,7 +607,7 @@ impl App {
         let area = f.area();
 
         // Always render the status view (now with inline diffs)
-        let status_view = StatusView::new(&self.status, &self.navigation, self.config.tab_width);
+        let status_view = StatusView::new(&self.status, &self.navigation, &self.config);
         status_view.render(f, area);
 
         // Render feedback message if there is one
@@ -661,6 +661,7 @@ impl App {
         use ratatui::{
             layout::Margin,
             style::Style,
+            text::{Line, Span},
             widgets::{Block, Borders, Clear, List, ListItem},
         };
 
@@ -683,7 +684,42 @@ impl App {
         // Clear the area where help will be rendered
         f.render_widget(Clear, help_area);
 
-        let help_items: Vec<ListItem> = help_text.into_iter().map(ListItem::new).collect();
+        // Style the help items based on whether they are headers or keybindings
+        let help_items: Vec<ListItem> = help_text
+            .into_iter()
+            .map(|text| {
+                if text.is_empty() {
+                    ListItem::new(Line::from(""))
+                } else if !text.starts_with("  ") {
+                    // This is a header (e.g., "Navigation:")
+                    ListItem::new(Line::from(Span::styled(
+                        text,
+                        Style::default()
+                            .fg(self.config.theme.help_key)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    )))
+                } else {
+                    // This is a keybinding line, split into key and description
+                    // Format: "  key     description"
+                    if let Some(split_pos) = text.find("     ") {
+                        let key_part = &text[..split_pos];
+                        let desc_part = &text[split_pos..];
+                        ListItem::new(Line::from(vec![
+                            Span::styled(key_part, Style::default().fg(self.config.theme.help_key)),
+                            Span::styled(
+                                desc_part,
+                                Style::default().fg(self.config.theme.help_desc),
+                            ),
+                        ]))
+                    } else {
+                        ListItem::new(Line::from(Span::styled(
+                            text,
+                            Style::default().fg(self.config.theme.help_desc),
+                        )))
+                    }
+                }
+            })
+            .collect();
 
         let help_block = Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT) // No bottom border for slide-up effect
