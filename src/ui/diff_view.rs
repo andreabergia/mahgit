@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::diff::generator::DiffError;
-use crate::diff::{Diff, DiffLine, LineType};
+use crate::diff::{Diff, DiffLine, HunkPosition, LineType};
 use crate::ui::inline_diff::InlineDiffRenderer;
 use ratatui::{
     Frame,
@@ -21,6 +21,7 @@ pub struct DiffView {
     viewport_height: usize,
     current_hunk_index: Option<usize>,
     config: Config,
+    hunk_positions: Vec<HunkPosition>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -32,12 +33,14 @@ struct LineNumberWidths {
 impl DiffView {
     pub fn new(diff: Diff, config: Config) -> Self {
         let current_hunk_index = if diff.hunks.is_empty() { None } else { Some(0) };
+        let hunk_positions = Self::calculate_hunk_positions_static(&diff);
         Self {
             content: DiffViewContent::Success(diff),
             scroll_position: 0,
             viewport_height: 0,
             current_hunk_index,
             config,
+            hunk_positions,
         }
     }
 
@@ -48,6 +51,7 @@ impl DiffView {
             viewport_height: 0,
             current_hunk_index: None,
             config,
+            hunk_positions: Vec::new(),
         }
     }
 
@@ -129,26 +133,74 @@ impl DiffView {
             .borders(Borders::ALL)
             .title(format!(" {} ", diff.file_path));
 
-        // Calculate viewport height
-        let viewport_height = area.height.saturating_sub(2) as usize; // Account for borders
+        let inner_area = block.inner(area);
+        frame.render_widget(block, area);
 
-        // Calculate content area
-        let _inner_area = block.inner(area);
+        if inner_area.height == 0 || inner_area.width == 0 {
+            return;
+        }
+
+        let viewport_height = inner_area.height as usize;
+
+        let active_hunk_index = self.resolve_active_hunk_index(&self.hunk_positions);
 
         // Generate diff lines for display
-        let diff_lines = self.generate_diff_lines(diff);
+        let diff_lines = self.generate_diff_lines(diff, active_hunk_index);
         let total_lines = diff_lines.len();
 
-        // Calculate visible range
-        let visible_start = self.scroll_position;
-        let visible_end = (visible_start + viewport_height).min(total_lines);
-        let visible_lines = &diff_lines[visible_start..visible_end];
+        // Calculate visible range and determine if we need sticky header
+        let visible_start = self.scroll_position.min(total_lines);
+        let pinned_header_line = active_hunk_index
+            .and_then(|idx| self.hunk_positions.get(idx))
+            .map(|pos| pos.start_line);
+        let should_pin_header = pinned_header_line
+            .map(|line| line < visible_start)
+            .unwrap_or(false);
 
-        // Create text content
-        let text = Text::from(visible_lines.to_vec());
-        let paragraph = Paragraph::new(text).block(block);
+        // Only reduce viewport height if we're actually showing the sticky header
+        let content_viewport_height = if should_pin_header {
+            viewport_height.saturating_sub(1)
+        } else {
+            viewport_height
+        };
 
-        frame.render_widget(paragraph, area);
+        let visible_lines = self.collect_visible_lines(
+            &diff_lines,
+            visible_start,
+            content_viewport_height,
+            if should_pin_header {
+                pinned_header_line
+            } else {
+                None
+            },
+        );
+
+        let mut content_area_for_lines = inner_area;
+
+        if should_pin_header
+            && let Some(active_index) = active_hunk_index
+            && content_area_for_lines.height > 0
+        {
+            let header_area = Rect {
+                x: content_area_for_lines.x,
+                y: content_area_for_lines.y,
+                width: content_area_for_lines.width,
+                height: 1,
+            };
+            self.render_sticky_header(frame, header_area, diff, active_index);
+            if content_area_for_lines.height > 1 {
+                content_area_for_lines.y += 1;
+                content_area_for_lines.height -= 1;
+            } else {
+                content_area_for_lines.height = 0;
+            }
+        }
+
+        if content_area_for_lines.height > 0 {
+            let text = Text::from(visible_lines);
+            let paragraph = Paragraph::new(text);
+            frame.render_widget(paragraph, content_area_for_lines);
+        }
 
         // Render scrollbar if content is scrollable
         if total_lines > viewport_height {
@@ -156,7 +208,11 @@ impl DiffView {
         }
     }
 
-    fn generate_diff_lines(&self, diff: &Diff) -> Vec<Line<'static>> {
+    fn generate_diff_lines(
+        &self,
+        diff: &Diff,
+        active_hunk_index: Option<usize>,
+    ) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         let line_number_widths = if self.config.show_line_numbers {
             Some(self.calculate_line_number_widths(diff))
@@ -166,14 +222,10 @@ impl DiffView {
 
         for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
             // Determine if this is the current hunk
-            let is_current_hunk = self.current_hunk_index == Some(hunk_index);
+            let is_current_hunk = active_hunk_index == Some(hunk_index);
 
-            // Add hunk header with highlighting if current
-            let header_style = if is_current_hunk {
-                self.config.theme.diff_hunk_header_focused
-            } else {
-                self.config.theme.diff_hunk_header
-            };
+            // Add hunk header (always use same style now)
+            let header_style = self.config.theme.diff_hunk_header;
 
             lines.push(Line::from(Span::styled(
                 hunk.header.raw.clone(),
@@ -343,11 +395,13 @@ impl DiffView {
 
     pub fn scroll_up(&mut self, lines: usize) {
         self.scroll_position = self.scroll_position.saturating_sub(lines);
+        self.sync_current_hunk_from_scroll();
     }
 
     pub fn scroll_down(&mut self, lines: usize) {
         let max_scroll = self.get_max_scroll_position();
         self.scroll_position = (self.scroll_position + lines).min(max_scroll);
+        self.sync_current_hunk_from_scroll();
     }
 
     pub fn page_up(&mut self) {
@@ -423,11 +477,13 @@ impl DiffView {
 
     pub fn go_to_top(&mut self) {
         self.scroll_position = 0;
+        self.sync_current_hunk_from_scroll();
     }
 
     pub fn go_to_bottom(&mut self) {
         let max_scroll = self.get_max_scroll_position();
         self.scroll_position = max_scroll;
+        self.sync_current_hunk_from_scroll();
     }
 
     pub fn update_viewport_height(&mut self, area_height: u16) {
@@ -436,7 +492,18 @@ impl DiffView {
 
     fn get_max_scroll_position(&self) -> usize {
         let total_lines = self.get_total_lines();
-        total_lines.saturating_sub(self.viewport_height)
+        let effective_viewport = if self.has_hunks() {
+            self.viewport_height.saturating_sub(1)
+        } else {
+            self.viewport_height
+        };
+        if effective_viewport == 0 {
+            // When viewport collapses, still bound scroll to at most total_lines - 1
+            // to prevent getting stuck past the end when viewport expands again
+            total_lines.saturating_sub(1)
+        } else {
+            total_lines.saturating_sub(effective_viewport)
+        }
     }
 
     fn get_total_lines(&self) -> usize {
@@ -521,6 +588,102 @@ impl DiffView {
                 }
                 line_count += 1 + hunk.lines.len(); // 1 for header + lines
             }
+        }
+    }
+
+    fn calculate_hunk_positions_static(diff: &Diff) -> Vec<HunkPosition> {
+        let mut positions = Vec::with_capacity(diff.hunks.len());
+        let mut current_line = 0;
+
+        for hunk in &diff.hunks {
+            let start_line = current_line;
+            let hunk_line_count = 1 + hunk.lines.len();
+            let end_line = current_line + hunk_line_count;
+
+            positions.push(HunkPosition {
+                start_line,
+                end_line,
+                screen_y: start_line,
+            });
+
+            current_line = end_line;
+        }
+
+        positions
+    }
+
+    fn resolve_active_hunk_index(&self, positions: &[HunkPosition]) -> Option<usize> {
+        let stored_index = self.current_hunk_index.filter(|idx| *idx < positions.len());
+
+        stored_index.or_else(|| self.find_hunk_for_line(positions, self.scroll_position))
+    }
+
+    fn find_hunk_for_line(&self, positions: &[HunkPosition], line_index: usize) -> Option<usize> {
+        // Binary search to find the hunk containing line_index
+        positions
+            .binary_search_by(|pos| {
+                if line_index < pos.start_line {
+                    std::cmp::Ordering::Greater
+                } else if line_index >= pos.end_line {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .ok()
+    }
+
+    fn collect_visible_lines(
+        &self,
+        diff_lines: &[Line<'static>],
+        visible_start: usize,
+        content_height: usize,
+        skip_line: Option<usize>,
+    ) -> Vec<Line<'static>> {
+        if content_height == 0 {
+            return Vec::new();
+        }
+
+        let mut lines = Vec::with_capacity(content_height);
+        let mut index = visible_start;
+
+        while lines.len() < content_height && index < diff_lines.len() {
+            if Some(index) == skip_line {
+                index += 1;
+                continue;
+            }
+            lines.push(diff_lines[index].clone());
+            index += 1;
+        }
+
+        lines
+    }
+
+    fn render_sticky_header(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        diff: &Diff,
+        active_hunk_index: usize,
+    ) {
+        if let Some(hunk) = diff.hunks.get(active_hunk_index) {
+            let header_line = Line::from(Span::styled(
+                hunk.header.raw.clone(),
+                self.config.theme.diff_hunk_header,
+            ));
+            let paragraph = Paragraph::new(header_line);
+            frame.render_widget(paragraph, area);
+        }
+    }
+
+    fn has_hunks(&self) -> bool {
+        matches!(&self.content, DiffViewContent::Success(diff) if !diff.hunks.is_empty())
+    }
+
+    fn sync_current_hunk_from_scroll(&mut self) {
+        if let DiffViewContent::Success(_) = &self.content {
+            self.current_hunk_index =
+                self.find_hunk_for_line(&self.hunk_positions, self.scroll_position);
         }
     }
 }
@@ -791,6 +954,29 @@ mod tests {
     }
 
     #[test]
+    fn test_scroll_updates_active_hunk() {
+        let diff = create_multi_hunk_diff();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+            show_line_numbers: true,
+        };
+        let mut diff_view = DiffView::new(diff, config);
+        diff_view.viewport_height = 4;
+
+        assert_eq!(diff_view.get_current_hunk_index(), Some(0));
+
+        // Move past the first hunk (header + 2 lines)
+        diff_view.scroll_down(3);
+        assert_eq!(diff_view.get_current_hunk_index(), Some(1));
+
+        // Scroll back up to return to the first hunk
+        diff_view.scroll_up(1);
+        assert_eq!(diff_view.get_current_hunk_index(), Some(0));
+    }
+
+    #[test]
     fn test_hunk_count() {
         let single_hunk_diff = create_test_diff();
         let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
@@ -828,7 +1014,7 @@ mod tests {
         };
         let diff_view = DiffView::new(diff.clone(), config.clone());
 
-        let lines_with_numbers = diff_view.generate_diff_lines(&diff);
+        let lines_with_numbers = diff_view.generate_diff_lines(&diff, diff_view.current_hunk_index);
         // First line after header belongs to the current hunk
         let first_content_line = &lines_with_numbers[1];
         assert_eq!(first_content_line.spans.len(), 7);
@@ -838,7 +1024,8 @@ mod tests {
 
         config.show_line_numbers = false;
         let diff_view_no_numbers = DiffView::new(diff.clone(), config);
-        let lines_without_numbers = diff_view_no_numbers.generate_diff_lines(&diff);
+        let lines_without_numbers = diff_view_no_numbers
+            .generate_diff_lines(&diff, diff_view_no_numbers.current_hunk_index);
         let first_line_without_numbers = &lines_without_numbers[1];
         assert_eq!(first_line_without_numbers.spans.len(), 3);
         assert_eq!(first_line_without_numbers.spans[0].content, "|");
@@ -855,7 +1042,7 @@ mod tests {
         };
         let mut diff_view = DiffView::new(diff.clone(), config.clone());
 
-        let lines = diff_view.generate_diff_lines(&diff);
+        let lines = diff_view.generate_diff_lines(&diff, diff_view.current_hunk_index);
         let first_hunk_line = &lines[1];
         assert_eq!(
             first_hunk_line.spans[0].style.bg,
@@ -863,7 +1050,8 @@ mod tests {
         );
 
         diff_view.current_hunk_index = Some(1);
-        let lines_second_hunk_selected = diff_view.generate_diff_lines(&diff);
+        let lines_second_hunk_selected =
+            diff_view.generate_diff_lines(&diff, diff_view.current_hunk_index);
         let first_hunk_line_after_switch = &lines_second_hunk_selected[1];
         assert_eq!(first_hunk_line_after_switch.spans[0].style.bg, None);
 
@@ -872,6 +1060,144 @@ mod tests {
         assert_eq!(
             second_hunk_line.spans[0].style.bg,
             Some(config.theme.diff_hunk_highlight)
+        );
+    }
+
+    #[test]
+    fn test_should_pin_header_when_scrolled_past_header() {
+        let diff = create_multi_hunk_diff();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+            show_line_numbers: true,
+        };
+        let mut diff_view = DiffView::new(diff, config);
+        diff_view.viewport_height = 5;
+
+        // At top (scroll_position = 0), header should not be pinned
+        let active_hunk_index = diff_view.resolve_active_hunk_index(&diff_view.hunk_positions);
+        let pinned_header_line = active_hunk_index
+            .and_then(|idx| diff_view.hunk_positions.get(idx))
+            .map(|pos| pos.start_line);
+        let should_pin_at_top = pinned_header_line
+            .map(|line| line < diff_view.scroll_position)
+            .unwrap_or(false);
+        assert!(
+            !should_pin_at_top,
+            "Header should not be pinned at scroll position 0"
+        );
+
+        // Scroll past first hunk header (line 0)
+        diff_view.scroll_down(2);
+        let active_hunk_index = diff_view.resolve_active_hunk_index(&diff_view.hunk_positions);
+        let pinned_header_line = active_hunk_index
+            .and_then(|idx| diff_view.hunk_positions.get(idx))
+            .map(|pos| pos.start_line);
+        let should_pin_scrolled = pinned_header_line
+            .map(|line| line < diff_view.scroll_position)
+            .unwrap_or(false);
+        assert!(
+            should_pin_scrolled,
+            "Header should be pinned when scrolled past it"
+        );
+        assert_eq!(pinned_header_line, Some(0), "First hunk starts at line 0");
+    }
+
+    #[test]
+    fn test_collect_visible_lines_skips_header_when_pinned() {
+        let diff = create_multi_hunk_diff();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+            show_line_numbers: true,
+        };
+        let diff_view = DiffView::new(diff.clone(), config);
+
+        let diff_lines = diff_view.generate_diff_lines(&diff, Some(0));
+
+        // Without pinning: collect lines starting at position 1, should include line at index 1
+        let visible_no_skip = diff_view.collect_visible_lines(&diff_lines, 1, 3, None);
+        assert_eq!(visible_no_skip.len(), 3);
+        // Line at index 1 should be included
+        assert!(
+            visible_no_skip[0]
+                .spans
+                .iter()
+                .any(|s| s.content.contains("line 1"))
+        );
+
+        // With pinning: collect lines starting at position 1, but skip line 0 (the header)
+        let visible_with_skip = diff_view.collect_visible_lines(&diff_lines, 1, 3, Some(0));
+        assert_eq!(visible_with_skip.len(), 3);
+        // Still starts at line 1, but we didn't lose any lines because we're not skipping our start line
+        assert!(
+            visible_with_skip[0]
+                .spans
+                .iter()
+                .any(|s| s.content.contains("line 1"))
+        );
+
+        // Test skipping a line within the visible range
+        let visible_skip_within = diff_view.collect_visible_lines(&diff_lines, 0, 3, Some(1));
+        assert_eq!(visible_skip_within.len(), 3);
+        // Should have lines at indices 0, 2, 3 (skipping index 1)
+        // First line should be the header
+        assert!(
+            visible_skip_within[0]
+                .spans
+                .iter()
+                .any(|s| s.content.contains("@@"))
+        );
+        // Second line should be from index 2 (the deletion line)
+        assert!(
+            visible_skip_within[1]
+                .spans
+                .iter()
+                .any(|s| s.content.contains("old line"))
+        );
+    }
+
+    #[test]
+    fn test_sticky_header_viewport_height_adjustment() {
+        let diff = create_multi_hunk_diff();
+        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let config = Config {
+            theme,
+            tab_width: 4,
+            show_line_numbers: true,
+        };
+        let mut diff_view = DiffView::new(diff, config);
+        diff_view.viewport_height = 5;
+
+        // Scroll past the first hunk header
+        diff_view.scroll_down(2);
+
+        // Verify the viewport height calculation
+        // When sticky header is shown, content viewport should be reduced by 1
+        let active_hunk_index = diff_view.resolve_active_hunk_index(&diff_view.hunk_positions);
+        let pinned_header_line = active_hunk_index
+            .and_then(|idx| diff_view.hunk_positions.get(idx))
+            .map(|pos| pos.start_line);
+        let should_pin = pinned_header_line
+            .map(|line| line < diff_view.scroll_position)
+            .unwrap_or(false);
+
+        let content_viewport_height = if should_pin {
+            diff_view.viewport_height.saturating_sub(1)
+        } else {
+            diff_view.viewport_height
+        };
+
+        assert!(should_pin, "Header should be pinned");
+        assert_eq!(
+            content_viewport_height, 4,
+            "Content viewport should be reduced by 1 when header is pinned"
+        );
+        assert_eq!(
+            diff_view.viewport_height, 5,
+            "Original viewport height should remain unchanged"
         );
     }
 }

@@ -26,6 +26,16 @@ struct ListRenderContext<'a> {
     track_visibility: bool,
 }
 
+#[derive(Debug, Clone)]
+struct HunkOverlay {
+    start_line: usize,
+    end_line: usize,
+    section_label: String,
+    file_path: String,
+    header: String,
+    selected: bool,
+}
+
 impl<'a> ListRenderContext<'a> {
     fn new(
         selected_list_index: &'a mut Option<usize>,
@@ -108,11 +118,14 @@ impl<'a> StatusView<'a> {
     }
 
     fn render_file_sections(&self, f: &mut Frame, area: Rect) {
+        let list_area = area;
+
         let mut items = Vec::new();
         let mut selected_list_index = None;
         let mut scroll_targets: Vec<usize> = Vec::new();
         let track_visibility = !self.navigation.is_manual_scroll_active();
         let cursor = self.navigation.current_cursor();
+        let mut overlays: Vec<HunkOverlay> = Vec::new();
         let mut render_ctx = ListRenderContext::new(
             &mut selected_list_index,
             &mut scroll_targets,
@@ -126,6 +139,7 @@ impl<'a> StatusView<'a> {
             "Conflicted files",
             self.status.conflicted_files(),
             cursor,
+            &mut overlays,
         );
 
         self.add_section_items_with_entries(
@@ -135,6 +149,7 @@ impl<'a> StatusView<'a> {
             "Unstaged changes",
             self.status.unstaged_files(),
             cursor,
+            &mut overlays,
         );
 
         self.add_section_items(
@@ -144,6 +159,7 @@ impl<'a> StatusView<'a> {
             "Untracked files",
             self.status.untracked_files(),
             cursor,
+            &mut overlays,
         );
 
         self.add_section_items_with_entries(
@@ -153,9 +169,50 @@ impl<'a> StatusView<'a> {
             "Staged changes",
             self.status.staged_files(),
             cursor,
+            &mut overlays,
         );
 
-        let viewport_height = area.height as usize;
+        let visible_start = self.navigation.scroll_offset();
+        let active_overlay = overlays
+            .iter()
+            .find(|o| {
+                o.selected
+                    && ranges_intersect(
+                        o.start_line,
+                        o.end_line,
+                        visible_start,
+                        visible_start.saturating_add(list_area.height as usize),
+                    )
+            })
+            .or_else(|| {
+                overlays.iter().find(|o| {
+                    ranges_intersect(
+                        o.start_line,
+                        o.end_line,
+                        visible_start,
+                        visible_start.saturating_add(list_area.height as usize),
+                    )
+                })
+            })
+            .or_else(|| overlays.first());
+
+        let sticky_header_height = if let Some(active) = active_overlay {
+            if active.start_line < visible_start && list_area.height > 1 {
+                1
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        let list_draw_area = Rect {
+            x: list_area.x,
+            y: list_area.y + sticky_header_height,
+            width: list_area.width,
+            height: list_area.height.saturating_sub(sticky_header_height),
+        };
+
+        let viewport_height = list_draw_area.height as usize;
         self.navigation
             .update_viewport_metrics(viewport_height, items.len(), &scroll_targets);
 
@@ -169,9 +226,24 @@ impl<'a> StatusView<'a> {
         }
         *list_state.offset_mut() = self.navigation.scroll_offset();
 
-        f.render_stateful_widget(list, area, &mut list_state);
+        if list_draw_area.height > 0 {
+            f.render_stateful_widget(list, list_draw_area, &mut list_state);
+        }
+
+        if sticky_header_height > 0
+            && let Some(active) = active_overlay
+        {
+            let header_area = Rect {
+                x: list_area.x,
+                y: list_area.y,
+                width: list_area.width,
+                height: sticky_header_height,
+            };
+            self.render_sticky_overlay(f, header_area, active);
+        }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add_section_items_with_entries(
         &self,
         items: &mut Vec<ListItem>,
@@ -180,6 +252,7 @@ impl<'a> StatusView<'a> {
         header: &str,
         entries: &[FileEntry],
         cursor: Option<SelectionCursor>,
+        overlays: &mut Vec<HunkOverlay>,
     ) {
         if entries.is_empty() {
             return;
@@ -230,7 +303,7 @@ impl<'a> StatusView<'a> {
                         Style::default().fg(self
                             .config
                             .theme
-                            .diff_hunk_header_focused
+                            .diff_hunk_header
                             .fg
                             .unwrap_or(Color::Yellow)),
                     )
@@ -257,7 +330,7 @@ impl<'a> StatusView<'a> {
                 {
                     if let Some(diff) = &diff_state.diff {
                         self.add_inline_diff_items_with_selection(
-                            items, diff, render_ctx, section, file_index, cursor,
+                            items, diff, render_ctx, section, file_index, cursor, overlays,
                         );
                     } else {
                         // Show loading placeholder
@@ -275,6 +348,7 @@ impl<'a> StatusView<'a> {
         items.push(ListItem::new(Line::from("")));
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add_section_items(
         &self,
         items: &mut Vec<ListItem>,
@@ -283,6 +357,7 @@ impl<'a> StatusView<'a> {
         header: &str,
         files: &[String],
         cursor: Option<SelectionCursor>,
+        overlays: &mut Vec<HunkOverlay>,
     ) {
         if files.is_empty() {
             return;
@@ -341,7 +416,7 @@ impl<'a> StatusView<'a> {
                         Style::default().fg(self
                             .config
                             .theme
-                            .diff_hunk_header_focused
+                            .diff_hunk_header
                             .fg
                             .unwrap_or(Color::Yellow)),
                     )
@@ -363,7 +438,7 @@ impl<'a> StatusView<'a> {
                 {
                     if let Some(diff) = &diff_state.diff {
                         self.add_inline_diff_items_with_selection(
-                            items, diff, render_ctx, section, file_index, cursor,
+                            items, diff, render_ctx, section, file_index, cursor, overlays,
                         );
                     } else {
                         // Show loading placeholder
@@ -399,6 +474,7 @@ impl<'a> StatusView<'a> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add_inline_diff_items_with_selection(
         &self,
         items: &mut Vec<ListItem>,
@@ -407,6 +483,7 @@ impl<'a> StatusView<'a> {
         section: StatusSection,
         file_index: usize,
         cursor: Option<SelectionCursor>,
+        overlays: &mut Vec<HunkOverlay>,
     ) {
         // Check for binary files
         if diff.binary {
@@ -431,7 +508,7 @@ impl<'a> StatusView<'a> {
             let is_collapsed = self.navigation.is_hunk_collapsed(&key, idx);
 
             // Hunk header with indentation and selection highlight
-            let header_index = items.len();
+            let start_line = items.len();
             let is_selected = matches!(cursor, Some(SelectionCursor::Hunk { section: s, file_index: fi, hunk_index: hi }) if s == section && fi == file_index && hi == idx);
             let header_style = if is_selected {
                 Style::default()
@@ -443,8 +520,8 @@ impl<'a> StatusView<'a> {
             };
 
             if is_selected {
-                render_ctx.ensure_visible(header_index);
-                render_ctx.select_index(header_index);
+                render_ctx.ensure_visible(start_line);
+                render_ctx.select_index(start_line);
             }
 
             // Add collapse indicator
@@ -540,6 +617,16 @@ impl<'a> StatusView<'a> {
             if diff.hunks.len() > 1 {
                 items.push(ListItem::new(Line::from("")));
             }
+
+            let end_line = items.len();
+            overlays.push(HunkOverlay {
+                start_line,
+                end_line,
+                section_label: section_label(section),
+                file_path: diff.file_path.clone(),
+                header: hunk.header.raw.clone(),
+                selected: is_selected,
+            });
         }
     }
 }
@@ -551,7 +638,7 @@ impl<'a> StatusView<'a> {
             Style::default().fg(self
                 .config
                 .theme
-                .diff_hunk_header_focused
+                .diff_hunk_header
                 .fg
                 .unwrap_or(Color::Yellow))
         } else {
@@ -618,5 +705,38 @@ impl<'a> StatusView<'a> {
     fn format_line_number(&self, number: Option<usize>, width: usize) -> String {
         let text = number.map(|n| n.to_string()).unwrap_or_default();
         format!("{text:>width$}")
+    }
+
+    fn render_sticky_overlay(&self, f: &mut Frame, area: Rect, overlay: &HunkOverlay) {
+        let spans = vec![
+            Span::styled(
+                overlay.section_label.clone(),
+                self.config.theme.section_header,
+            ),
+            Span::raw(" • "),
+            Span::styled(
+                overlay.file_path.clone(),
+                Style::default().fg(self.config.theme.selected_fg),
+            ),
+            Span::raw(" • "),
+            Span::styled(overlay.header.clone(), self.config.theme.diff_hunk_header),
+        ];
+
+        let line = Line::from(spans);
+        let paragraph = Paragraph::new(line);
+        f.render_widget(paragraph, area);
+    }
+}
+
+fn ranges_intersect(a_start: usize, a_end: usize, b_start: usize, b_end: usize) -> bool {
+    a_start < b_end && b_start < a_end
+}
+
+fn section_label(section: StatusSection) -> String {
+    match section {
+        StatusSection::Staged => "Staged changes".to_string(),
+        StatusSection::Unstaged => "Unstaged changes".to_string(),
+        StatusSection::Untracked => "Untracked files".to_string(),
+        StatusSection::Conflicted => "Conflicted files".to_string(),
     }
 }

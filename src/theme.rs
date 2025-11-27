@@ -12,7 +12,6 @@ pub struct Theme {
     pub section_header: Style,
     pub diff_context: Color,
     pub diff_hunk_header: Style,
-    pub diff_hunk_header_focused: Style,
     pub diff_no_newline: Color,
     pub diff_line_number: Color,
     pub diff_gutter_addition: Color,
@@ -52,9 +51,6 @@ impl Theme {
                 .add_modifier(Modifier::BOLD),
             diff_context: Color::White,
             diff_hunk_header: Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-            diff_hunk_header_focused: Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
             diff_no_newline: Color::DarkGray,
@@ -85,9 +81,6 @@ impl Theme {
                 .add_modifier(Modifier::BOLD),
             diff_context: Color::Black,
             diff_hunk_header: Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-            diff_hunk_header_focused: Style::default()
                 .fg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
             diff_no_newline: Color::Gray,
@@ -118,10 +111,7 @@ impl Theme {
                 .add_modifier(Modifier::BOLD),
             diff_context: Color::Rgb(201, 209, 217), // #C9D1D9
             diff_hunk_header: Style::default()
-                .fg(Color::Rgb(127, 219, 202)) // #7FDBCA
-                .add_modifier(Modifier::BOLD),
-            diff_hunk_header_focused: Style::default()
-                .fg(Color::Rgb(224, 175, 104)) // #E0AF68
+                .fg(Color::Rgb(224, 175, 104)) // #E0AF68 - gold
                 .add_modifier(Modifier::BOLD),
             diff_no_newline: Color::Rgb(110, 118, 129), // #6E7681
             diff_line_number: Color::Rgb(110, 118, 129), // #6E7681
@@ -151,10 +141,7 @@ impl Theme {
                 .add_modifier(Modifier::BOLD),
             diff_context: Color::Rgb(36, 41, 47), // #24292F
             diff_hunk_header: Style::default()
-                .fg(Color::Rgb(9, 105, 218)) // #0969DA
-                .add_modifier(Modifier::BOLD),
-            diff_hunk_header_focused: Style::default()
-                .fg(Color::Rgb(130, 80, 223)) // #8250DF
+                .fg(Color::Rgb(130, 80, 223)) // #8250DF - purple/magenta
                 .add_modifier(Modifier::BOLD),
             diff_no_newline: Color::Rgb(101, 109, 118), // #656D76
             diff_line_number: Color::Rgb(140, 149, 160), // #8C95A0
