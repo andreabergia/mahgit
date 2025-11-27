@@ -261,6 +261,8 @@ impl App {
             Command::NextHunk => self.scroll_half_page(VerticalDirection::Down),
             Command::JumpToPreviousHunk => self.jump_within_parent(VerticalDirection::Up),
             Command::JumpToNextHunk => self.jump_within_parent(VerticalDirection::Down),
+            Command::IncreaseHunkContext => self.increase_hunk_context(),
+            Command::DecreaseHunkContext => self.decrease_hunk_context(),
             Command::PageForward => self.scroll_full_page(VerticalDirection::Down),
             Command::MoveUpHierarchy => self.move_up_hierarchy(),
             Command::MoveDownHierarchy => self.move_down_hierarchy(),
@@ -882,6 +884,109 @@ impl App {
                 SelectionCursor::Hunk { .. } => {
                     // Already at hunk level, do nothing (no-op)
                 }
+            }
+        }
+    }
+
+    fn increase_hunk_context(&mut self) {
+        let Some(sel) = self.navigation.get_selected_file(&self.status) else {
+            return;
+        };
+
+        let diff_key = FileDiffKey::new(sel.path.clone(), sel.context);
+
+        let (file_path, diff_context, current_context) = {
+            let Some(state) = self.navigation.get_file_diff(&diff_key) else {
+                return;
+            };
+            let Some(_diff) = &state.diff else {
+                return;
+            };
+            (
+                state.file_path.clone(),
+                state.diff_context.clone(),
+                state.context_lines,
+            )
+        };
+
+        let new_context = current_context + 3;
+
+        if let Some(state) = self.navigation.get_file_diff_mut(&diff_key) {
+            state.context_lines = new_context;
+        }
+
+        self.regenerate_diff_with_context(&diff_key, &file_path, diff_context);
+    }
+
+    fn decrease_hunk_context(&mut self) {
+        let Some(sel) = self.navigation.get_selected_file(&self.status) else {
+            return;
+        };
+
+        let diff_key = FileDiffKey::new(sel.path.clone(), sel.context);
+
+        let (file_path, diff_context, current_context) = {
+            let Some(state) = self.navigation.get_file_diff(&diff_key) else {
+                return;
+            };
+            let Some(_diff) = &state.diff else {
+                return;
+            };
+            (
+                state.file_path.clone(),
+                state.diff_context.clone(),
+                state.context_lines,
+            )
+        };
+
+        if current_context > 3 {
+            let new_context = current_context.saturating_sub(3);
+
+            if let Some(state) = self.navigation.get_file_diff_mut(&diff_key) {
+                state.context_lines = new_context;
+            }
+
+            self.regenerate_diff_with_context(&diff_key, &file_path, diff_context);
+        }
+    }
+
+    fn regenerate_diff_with_context(
+        &mut self,
+        diff_key: &FileDiffKey,
+        file_path: &str,
+        diff_context: crate::diff::DiffContext,
+    ) {
+        let (context_lines, current_hunk) = {
+            let state = self.navigation.get_file_diff(diff_key);
+            let context_lines = state.map(|s| s.context_lines).unwrap_or(3);
+            let current_hunk = state.map(|s| s.current_hunk).unwrap_or(0);
+            (context_lines, current_hunk)
+        };
+
+        let generator = DiffGenerator::new(self.repository.git2_repo());
+        let result = generator.generate_diff_with_context(
+            file_path,
+            diff_context.clone(),
+            Some(context_lines as u32),
+        );
+
+        match result {
+            Ok(new_diff) => {
+                let merged_diff = crate::diff::merge_adjacent_hunks(new_diff);
+                self.navigation
+                    .set_file_diff(diff_key.clone(), merged_diff, diff_context);
+
+                if let Some(state) = self.navigation.get_file_diff_mut(diff_key) {
+                    state.context_lines = context_lines;
+                    state.current_hunk = current_hunk;
+                }
+            }
+            Err(err) => {
+                self.feedback_manager
+                    .show_result(crate::operations::OperationResult::new(format!(
+                        "Failed to regenerate diff: {}",
+                        err
+                    )));
             }
         }
     }

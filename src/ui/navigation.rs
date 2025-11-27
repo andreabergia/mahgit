@@ -69,6 +69,8 @@ pub struct InlineDiffState {
     /// Tracks which hunks are collapsed (true = collapsed, false = expanded)
     /// Hunks are expanded by default
     pub collapsed_hunks: std::collections::HashSet<usize>,
+    /// Custom context lines for the entire diff (applies to all hunks)
+    pub context_lines: usize,
 }
 
 pub struct NavigationState {
@@ -285,6 +287,10 @@ impl NavigationState {
         self.file_diffs.get(key)
     }
 
+    pub fn get_file_diff_mut(&mut self, key: &FileDiffKey) -> Option<&mut InlineDiffState> {
+        self.file_diffs.get_mut(key)
+    }
+
     pub fn toggle_file_diff_expanded(
         &mut self,
         key: FileDiffKey,
@@ -303,6 +309,7 @@ impl NavigationState {
                     expanded: true,
                     current_hunk: 0,
                     collapsed_hunks: std::collections::HashSet::new(),
+                    context_lines: 3,
                 },
             );
         }
@@ -325,6 +332,7 @@ impl NavigationState {
                 expanded: true,
                 current_hunk: 0,
                 collapsed_hunks: std::collections::HashSet::new(),
+                context_lines: 3,
             },
         );
         self.clear_manual_scroll();

@@ -50,6 +50,10 @@ pub enum Command {
     ShowHelp,
     CloseHelp,
 
+    // Hunk context expansion
+    IncreaseHunkContext,
+    DecreaseHunkContext,
+
     // Unknown command
     Unknown,
 
@@ -213,6 +217,8 @@ impl InputHandler {
                     'n' => Command::JumpToNextHunk,
                     'p' => Command::JumpToPreviousHunk,
                     '?' => Command::ShowHelp,
+                    '=' => Command::IncreaseHunkContext,
+                    '-' => Command::DecreaseHunkContext,
                     _ => Command::Unknown,
                 };
 
@@ -287,6 +293,8 @@ impl InputHandler {
             "  Enter   Open file in editor",
             "  n       Jump to end of current file/section",
             "  p       Jump to start of current file/section",
+            "  =       Expand context in current hunk",
+            "  -       Reduce context in current hunk",
             "",
             "File Operations:",
             "  s       Stage file or current diff hunk",

@@ -31,10 +31,20 @@ impl<'repo> DiffGenerator<'repo> {
     }
 
     pub fn generate_diff(&self, file_path: &str, context: DiffContext) -> Result<Diff, DiffError> {
+        self.generate_diff_with_context(file_path, context, None)
+    }
+
+    pub fn generate_diff_with_context(
+        &self,
+        file_path: &str,
+        context: DiffContext,
+        context_lines: Option<u32>,
+    ) -> Result<Diff, DiffError> {
         // Pre-check file size and binary status
         self.check_file_constraints(file_path, &context)?;
         let mut diff_options = DiffOptions::new();
         diff_options.pathspec(file_path);
+        diff_options.context_lines(context_lines.unwrap_or(3));
 
         let git_diff = match context {
             DiffContext::WorkingTreeToIndex => {
@@ -96,7 +106,7 @@ impl<'repo> DiffGenerator<'repo> {
                             count: hunk_data.new_lines(),
                         },
                         stageable: true,
-                        context_lines: 3,
+                        context_lines: context_lines.unwrap_or(3) as usize,
                         lines: Vec::new(),
                     };
                     hunks.push(diff_hunk);
