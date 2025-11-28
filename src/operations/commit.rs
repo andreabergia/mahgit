@@ -136,6 +136,13 @@ impl<'repo> CommitOperations<'repo> {
 
     /// Prepares a reword commit (amend message only, no content changes)
     fn prepare_reword_commit(&self) -> Result<CommitPreparation, RepositoryError> {
+        // Verify no staged changes - reword should only change the message
+        if self.has_staged_changes()? {
+            return Err(RepositoryError::Other(
+                "Cannot reword: staged changes detected. Use amend instead.".into(),
+            ));
+        }
+
         let head_message = self.get_head_commit_message()?;
 
         Ok(CommitPreparation {
@@ -520,5 +527,58 @@ mod tests {
         assert!(preparation.flags.amend);
         assert!(preparation.flags.no_edit);
         assert_eq!(preparation.message_template, "Initial commit");
+    }
+
+    #[test]
+    fn test_prepare_reword_commit_without_staged_changes() {
+        let (repo, temp_dir) = create_test_repo("reword_no_changes");
+
+        // Create an initial commit
+        let file_path = temp_dir.path().join("test.txt");
+        fs::write(&file_path, "initial content").unwrap();
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+        commit_ops
+            .execute_commit("Initial commit", &CommitFlags::default())
+            .unwrap();
+
+        // Prepare reword commit (should succeed with no staged changes)
+        let preparation = commit_ops.prepare_reword_commit().unwrap();
+
+        assert!(matches!(preparation.mode, CommitMode::Reword));
+        assert!(preparation.flags.amend);
+        assert!(!preparation.flags.no_edit);
+        assert_eq!(preparation.message_template, "Initial commit");
+    }
+
+    #[test]
+    fn test_prepare_reword_commit_rejects_staged_changes() {
+        let (repo, temp_dir) = create_test_repo("reword_with_changes");
+
+        // Create an initial commit
+        let file_path = temp_dir.path().join("test.txt");
+        fs::write(&file_path, "initial content").unwrap();
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+        commit_ops
+            .execute_commit("Initial commit", &CommitFlags::default())
+            .unwrap();
+
+        // Stage additional changes
+        fs::write(&file_path, "modified content").unwrap();
+        repo.add_to_index("test.txt").unwrap();
+
+        // Prepare reword commit (should fail due to staged changes)
+        let result = commit_ops.prepare_reword_commit();
+
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Cannot reword: staged changes detected")
+        );
     }
 }
