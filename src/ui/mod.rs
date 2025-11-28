@@ -302,7 +302,14 @@ impl App {
                 self.input_handler.clear_prefix_state();
             }
 
-            if event::poll(std::time::Duration::from_millis(16))? {
+            // Calculate poll timeout: use remaining time until modal or 16ms, whichever is shorter
+            let poll_timeout = if let Some(remaining) = self.input_handler.time_until_modal() {
+                remaining.min(std::time::Duration::from_millis(16))
+            } else {
+                std::time::Duration::from_millis(16)
+            };
+
+            if event::poll(poll_timeout)? {
                 match event::read()? {
                     Event::Key(key) => {
                         use crossterm::event::{KeyCode, KeyModifiers};

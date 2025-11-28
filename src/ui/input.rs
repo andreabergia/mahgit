@@ -125,6 +125,20 @@ impl InputHandler {
         None
     }
 
+    /// Get remaining time until modal timeout expires
+    /// Returns None if no prefix key is pending or timeout already passed
+    pub fn time_until_modal(&self) -> Option<Duration> {
+        if let Some(prev) = &self.previous_key
+            && Self::is_modal_prefix_key(prev.character)
+        {
+            let elapsed = Instant::now().duration_since(prev.timestamp);
+            if elapsed < self.modal_timeout {
+                return Some(self.modal_timeout - elapsed);
+            }
+        }
+        None
+    }
+
     /// Check if a character is a modal prefix key
     fn is_modal_prefix_key(c: char) -> bool {
         matches!(c, 'c')
