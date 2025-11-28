@@ -1,5 +1,6 @@
 pub mod console;
 pub mod diff_renderer;
+pub mod diff_search;
 pub mod diff_view;
 pub mod feedback;
 pub mod inline_diff;

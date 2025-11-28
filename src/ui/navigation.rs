@@ -1,5 +1,6 @@
 use crate::diff::Diff;
 use crate::status::RepositoryStatus;
+use crate::ui::diff_search::DiffSearchState;
 use std::cell::Cell;
 use std::collections::HashMap;
 
@@ -71,6 +72,7 @@ pub struct InlineDiffState {
     pub collapsed_hunks: std::collections::HashSet<usize>,
     /// Custom context lines for the entire diff (applies to all hunks)
     pub context_lines: usize,
+    pub search_state: DiffSearchState,
 }
 
 pub struct NavigationState {
@@ -310,6 +312,7 @@ impl NavigationState {
                     current_hunk: 0,
                     collapsed_hunks: std::collections::HashSet::new(),
                     context_lines: 3,
+                    search_state: DiffSearchState::default(),
                 },
             );
         }
@@ -333,6 +336,7 @@ impl NavigationState {
                 current_hunk: 0,
                 collapsed_hunks: std::collections::HashSet::new(),
                 context_lines: 3,
+                search_state: DiffSearchState::default(),
             },
         );
         self.clear_manual_scroll();
