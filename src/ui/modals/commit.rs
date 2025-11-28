@@ -1,22 +1,17 @@
-use super::{Modal, render_bottom_panel_modal};
-use crate::config::Config;
+use super::Modal;
 use crate::ui::input::{Command, CommitMode};
-use ratatui::{Frame, layout::Rect};
-use std::sync::Arc;
 
 /// Modal for commit operations
 ///
 /// Displays available commit modes and handles key selection.
 /// Supports: normal commit, amend, extend, and reword.
-pub struct CommitModal {
-    #[allow(dead_code)] // Reserved for future customization
-    config: Arc<Config>,
-}
+#[derive(Default)]
+pub struct CommitModal;
 
 impl CommitModal {
     /// Create a new commit modal
-    pub fn new(config: Arc<Config>) -> Self {
-        Self { config }
+    pub fn new() -> Self {
+        Self
     }
 }
 
@@ -43,29 +38,15 @@ impl Modal for CommitModal {
             _ => None,
         }
     }
-
-    fn render(&self, frame: &mut Frame, area: Rect, config: &Config) {
-        // Use the default bottom-panel rendering
-        render_bottom_panel_modal(frame, area, config, self.title(), &self.options());
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::Theme;
-
-    fn test_config() -> Arc<Config> {
-        Arc::new(Config {
-            theme: Theme::default(),
-            tab_width: 4,
-            show_line_numbers: true,
-        })
-    }
 
     #[test]
     fn test_commit_modal_options() {
-        let modal = CommitModal::new(test_config());
+        let modal = CommitModal::new();
         let options = modal.options();
 
         assert_eq!(options.len(), 4);
@@ -75,7 +56,7 @@ mod tests {
 
     #[test]
     fn test_commit_modal_key_handling() {
-        let modal = CommitModal::new(test_config());
+        let modal = CommitModal::new();
 
         assert_eq!(
             modal.handle_key('c'),

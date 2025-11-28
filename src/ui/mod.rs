@@ -1221,7 +1221,7 @@ impl App {
 
     /// Show the commit modal
     fn show_commit_modal(&mut self) {
-        let modal = modals::CommitModal::new(self.config.clone());
+        let modal = modals::CommitModal::new();
         self.active_modal = Some(Box::new(modal));
         self.modal_context = ModalContext::Commit;
     }
