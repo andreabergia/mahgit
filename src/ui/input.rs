@@ -54,11 +54,30 @@ pub enum Command {
     IncreaseHunkContext,
     DecreaseHunkContext,
 
+    // Commit operations
+    OpenCommitModal,
+    Commit(CommitMode),
+
     // Unknown command
     Unknown,
 
     // No-op command for unhandled events
     None,
+}
+
+/// Commit operation modes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitMode {
+    /// Normal commit (git commit)
+    Normal,
+    /// Amend the last commit (git commit --amend)
+    Amend,
+    /// Extend the last commit without editing message (git commit --amend --no-edit)
+    Extend,
+    /// Reword the last commit (change message only)
+    Reword,
+    /// Commit without running pre-commit hooks (git commit --no-verify)
+    NoVerify,
 }
 
 #[derive(Debug)]

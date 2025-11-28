@@ -4,6 +4,7 @@ pub mod diff_view;
 pub mod feedback;
 pub mod inline_diff;
 pub mod input;
+pub mod modals;
 pub mod navigation;
 pub mod status_view;
 
@@ -272,6 +273,12 @@ impl App {
             }
             Command::GoToBottomOfDiff => {
                 // TODO: Implement inline diff navigation
+            }
+            Command::OpenCommitModal => {
+                // TODO: Show commit modal (Phase 2)
+            }
+            Command::Commit(_mode) => {
+                // TODO: Handle commit operation (Phase 4)
             }
             Command::Unknown => {
                 // Ignore unknown commands
