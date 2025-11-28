@@ -206,9 +206,13 @@ fn test_context_lines_have_syntax_highlighting() {
     let lines = renderer.generate_diff_lines(&diff, None, None);
 
     // Find a context line (the "fn main() {" line)
+    // Note: with syntax highlighting, "fn" and "main" are in separate spans
     let context_line = lines
         .iter()
-        .find(|line| line.spans.iter().any(|s| s.content.contains("fn main")))
+        .find(|line| {
+            let full_text: String = line.spans.iter().map(|s| &s.content[..]).collect();
+            full_text.contains("fn main")
+        })
         .expect("Should have a line with 'fn main'");
 
     println!("\n=== Context line analysis ===");
@@ -262,9 +266,13 @@ fn test_inactive_context_lines_still_have_syntax_colors() {
     let lines = renderer.generate_diff_lines(&diff, None, None);
 
     // Find the "fn main()" context line
+    // Note: with syntax highlighting, "fn" and "main" are in separate spans
     let fn_main_line = lines
         .iter()
-        .find(|line| line.spans.iter().any(|s| s.content.contains("fn main")))
+        .find(|line| {
+            let full_text: String = line.spans.iter().map(|s| &s.content[..]).collect();
+            full_text.contains("fn main")
+        })
         .expect("Should have 'fn main' line");
 
     println!("\n=== Inactive context line 'fn main()' ===");

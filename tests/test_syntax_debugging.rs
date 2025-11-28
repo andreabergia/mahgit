@@ -281,6 +281,7 @@ fn test_full_diff_rendering() {
                             | Color::LightYellow
                             | Color::Yellow
                             | Color::DarkGray
+                            | Color::Rgb(_, _, _)
                     )
                 })
                 .unwrap_or(false)
