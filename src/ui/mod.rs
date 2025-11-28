@@ -22,10 +22,12 @@ use crossterm::{
 };
 use feedback::FeedbackManager;
 use input::{Command, InputHandler};
+use modals::{BoxedModal, ModalContext};
 use navigation::{FileDiffKey, NavigationState, SelectedFile, SelectionCursor};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use status_view::StatusView;
 use std::io::{Stdout, stdout};
+use std::sync::Arc;
 
 pub struct App {
     should_quit: bool,
@@ -36,7 +38,11 @@ pub struct App {
     feedback_manager: FeedbackManager,
     show_help: bool,
     pending_editor_file: Option<String>,
-    config: Config,
+    config: Arc<Config>,
+    /// Currently active modal (if any)
+    active_modal: Option<BoxedModal>,
+    /// Modal context for tracking what modal system is active
+    modal_context: ModalContext,
 }
 
 #[derive(Clone, PartialEq)]
@@ -66,7 +72,9 @@ impl App {
             feedback_manager: FeedbackManager::new(),
             show_help: false,
             pending_editor_file: None,
-            config,
+            config: Arc::new(config),
+            active_modal: None,
+            modal_context: ModalContext::None,
         }
     }
 
@@ -105,14 +113,29 @@ impl App {
 
     pub fn process_key_event(&mut self, key_event: crossterm::event::KeyEvent) {
         use crate::ui::input::InputResult;
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        // If modal is active, route keys to modal first
+        if self.modal_context != ModalContext::None {
+            match key_event.code {
+                KeyCode::Esc => self.close_modal(),
+                KeyCode::Char(c) if key_event.modifiers == KeyModifiers::NONE => {
+                    // Try to handle the key in the modal
+                    let _ = self.handle_modal_input(c);
+                }
+                _ => {} // Ignore other keys in modal mode
+            }
+            return;
+        }
 
         let result = self.input_handler.handle_key(key_event);
         match result {
             InputResult::Command(command) => self.handle_command(command),
             InputResult::ShowModal(prefix) => {
-                // TODO: Show modal for the given prefix
-                // This will be implemented in Phase 3
-                let _ = prefix;
+                // Future: support other modals (branch, push, pull, log, etc.)
+                if prefix == 'c' {
+                    self.show_commit_modal();
+                }
             }
             InputResult::Pending => {
                 // Waiting for second key, do nothing
@@ -124,8 +147,11 @@ impl App {
     }
 
     pub fn process_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
-        let command = self.input_handler.handle_mouse(mouse_event);
-        self.handle_command(command);
+        // Ignore mouse events when modal is active
+        if self.modal_context == ModalContext::None {
+            let command = self.input_handler.handle_mouse(mouse_event);
+            self.handle_command(command);
+        }
     }
 
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -205,25 +231,44 @@ impl App {
 
             // Check if we should show a modal (timeout reached for prefix key)
             if let Some(prefix) = self.input_handler.should_show_modal() {
-                // TODO: Show modal for the given prefix
-                // This will be implemented in Phase 3
-                // For now, just clear the pending state
-                let _ = prefix;
+                // Future: support other modals (branch, push, pull, log, etc.)
+                if prefix == 'c' {
+                    self.show_commit_modal();
+                }
                 self.input_handler.clear_prefix_state();
             }
 
             if event::poll(std::time::Duration::from_millis(16))? {
                 match event::read()? {
                     Event::Key(key) => {
+                        use crossterm::event::{KeyCode, KeyModifiers};
+
+                        // If modal is active, route keys to modal first
+                        if self.modal_context != ModalContext::None {
+                            match key.code {
+                                KeyCode::Esc => self.close_modal(),
+                                KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
+                                    // Try to handle the key in the modal
+                                    if !self.handle_modal_input(c) {
+                                        // Key not recognized by modal, ignore it
+                                    }
+                                }
+                                _ => {} // Ignore other keys in modal mode
+                            }
+                            continue;
+                        }
+
+                        // Normal input handling (no modal active)
                         use crate::ui::input::InputResult;
 
                         let result = self.input_handler.handle_key(key);
                         match result {
                             InputResult::Command(command) => self.handle_command(command),
                             InputResult::ShowModal(prefix) => {
-                                // TODO: Show modal for the given prefix
-                                // This will be implemented in Phase 3
-                                let _ = prefix;
+                                // Future: support other modals (branch, push, pull, log, etc.)
+                                if prefix == 'c' {
+                                    self.show_commit_modal();
+                                }
                             }
                             InputResult::Pending => {
                                 // Waiting for second key, do nothing
@@ -234,8 +279,11 @@ impl App {
                         }
                     }
                     Event::Mouse(mouse) => {
-                        let command = self.input_handler.handle_mouse(mouse);
-                        self.handle_command(command);
+                        // Ignore mouse events when modal is active
+                        if self.modal_context == ModalContext::None {
+                            let command = self.input_handler.handle_mouse(mouse);
+                            self.handle_command(command);
+                        }
                     }
                     _ => {}
                 }
@@ -663,17 +711,23 @@ impl App {
         self.navigation.ensure_cursor_valid(&self.status);
         let area = f.area();
 
-        // Always render the status view (now with inline diffs)
+        // 1. Always render the status view (now with inline diffs)
         let status_view = StatusView::new(&self.status, &self.navigation, &self.config);
         status_view.render(f, area);
 
-        // Render feedback message if there is one
+        // 2. Render feedback message if there is one
         if let Some(feedback) = self.feedback_manager.get_current_message() {
             self.render_feedback_message(f, feedback);
         }
 
+        // 3. Render help overlay (if shown)
         if self.show_help {
             self.render_help_overlay(f);
+        }
+
+        // 4. Render active modal (if any) - renders on top
+        if let Some(modal) = &self.active_modal {
+            modal.render(f, area, &self.config);
         }
     }
 
@@ -1038,5 +1092,32 @@ impl App {
         }
     }
 
-    // TODO: Implement inline hunk staging methods
+    // Modal management methods
+
+    /// Show the commit modal
+    fn show_commit_modal(&mut self) {
+        let modal = modals::CommitModal::new(self.config.clone());
+        self.active_modal = Some(Box::new(modal));
+        self.modal_context = ModalContext::Commit;
+    }
+
+    /// Close the currently active modal
+    fn close_modal(&mut self) {
+        self.active_modal = None;
+        self.modal_context = ModalContext::None;
+    }
+
+    /// Handle input when a modal is active
+    ///
+    /// Returns true if the key was handled by the modal
+    fn handle_modal_input(&mut self, key: char) -> bool {
+        if let Some(modal) = &self.active_modal
+            && let Some(cmd) = modal.handle_key(key)
+        {
+            self.close_modal();
+            self.handle_command(cmd);
+            return true;
+        }
+        false
+    }
 }
