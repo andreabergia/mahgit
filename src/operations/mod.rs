@@ -1,3 +1,4 @@
+pub mod commit;
 pub mod editor;
 pub mod staging;
 pub use staging::*;
