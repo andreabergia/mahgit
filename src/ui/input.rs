@@ -89,8 +89,6 @@ pub enum CommitMode {
     Extend,
     /// Reword the last commit (change message only)
     Reword,
-    /// Commit without running pre-commit hooks (git commit --no-verify)
-    NoVerify,
 }
 
 #[derive(Debug)]
@@ -332,7 +330,6 @@ impl InputHandler {
                     "ca" => InputResult::Command(Command::Commit(CommitMode::Amend)),
                     "ce" => InputResult::Command(Command::Commit(CommitMode::Extend)),
                     "cw" => InputResult::Command(Command::Commit(CommitMode::Reword)),
-                    "cn" => InputResult::Command(Command::Commit(CommitMode::NoVerify)),
                     _ => InputResult::None,
                 };
             } else if elapsed < self.sequence_timeout {
@@ -347,7 +344,6 @@ impl InputHandler {
                         ('c', 'a') => InputResult::Command(Command::Commit(CommitMode::Amend)),
                         ('c', 'e') => InputResult::Command(Command::Commit(CommitMode::Extend)),
                         ('c', 'w') => InputResult::Command(Command::Commit(CommitMode::Reword)),
-                        ('c', 'n') => InputResult::Command(Command::Commit(CommitMode::NoVerify)),
                         _ => InputResult::None,
                     };
                 }

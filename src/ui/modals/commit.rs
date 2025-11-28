@@ -7,7 +7,7 @@ use std::sync::Arc;
 /// Modal for commit operations
 ///
 /// Displays available commit modes and handles key selection.
-/// Supports: normal commit, amend, extend, reword, and no-verify.
+/// Supports: normal commit, amend, extend, and reword.
 pub struct CommitModal {
     #[allow(dead_code)] // Reserved for future customization
     config: Arc<Config>,
@@ -31,7 +31,6 @@ impl Modal for CommitModal {
             ('a', "amend", "Amend HEAD"),
             ('e', "extend", "Extend HEAD"),
             ('w', "reword", "Reword HEAD"),
-            ('n', "no-verify", "Skip hooks"),
         ]
     }
 
@@ -41,7 +40,6 @@ impl Modal for CommitModal {
             'a' => Some(Command::Commit(CommitMode::Amend)),
             'e' => Some(Command::Commit(CommitMode::Extend)),
             'w' => Some(Command::Commit(CommitMode::Reword)),
-            'n' => Some(Command::Commit(CommitMode::NoVerify)),
             _ => None,
         }
     }
@@ -70,7 +68,7 @@ mod tests {
         let modal = CommitModal::new(test_config());
         let options = modal.options();
 
-        assert_eq!(options.len(), 5);
+        assert_eq!(options.len(), 4);
         assert_eq!(options[0], ('c', "commit", "Create commit"));
         assert_eq!(options[1], ('a', "amend", "Amend HEAD"));
     }
@@ -94,10 +92,6 @@ mod tests {
         assert_eq!(
             modal.handle_key('w'),
             Some(Command::Commit(CommitMode::Reword))
-        );
-        assert_eq!(
-            modal.handle_key('n'),
-            Some(Command::Commit(CommitMode::NoVerify))
         );
         assert_eq!(modal.handle_key('x'), None);
     }

@@ -21,7 +21,6 @@ User: c (waits)
    │ a  amend           Amend HEAD    │
    │ e  extend          Extend HEAD   │
    │ w  reword          Reword HEAD   │
-   │ n  no-verify       Skip hooks    │
    └──────────────────────────────────┘
 User: a
 → Modal closes, opens editor for amend commit
@@ -79,7 +78,6 @@ impl Modal for CommitModal {
             ('a', "amend", "Amend HEAD"),
             ('e', "extend", "Extend HEAD"),
             ('w', "reword", "Reword HEAD"),
-            ('n', "no-verify", "Skip hooks"),
         ]
     }
 
@@ -89,7 +87,6 @@ impl Modal for CommitModal {
             'a' => Some(Command::Commit(CommitMode::Amend)),
             'e' => Some(Command::Commit(CommitMode::Extend)),
             'w' => Some(Command::Commit(CommitMode::Reword)),
-            'n' => Some(Command::Commit(CommitMode::NoVerify)),
             _ => None,
         }
     }
@@ -116,7 +113,6 @@ pub enum CommitMode {
     Amend,       // git commit --amend
     Extend,      // git commit --amend --no-edit
     Reword,      // git commit --amend (message only)
-    NoVerify,    // git commit --no-verify
 }
 ```
 
@@ -304,7 +300,6 @@ impl<'repo> CommitOperations<'repo> {
             CommitMode::Amend => self.prepare_amend_commit(),
             CommitMode::Extend => self.prepare_extend_commit(),
             CommitMode::Reword => self.prepare_reword_commit(),
-            CommitMode::NoVerify => self.prepare_no_verify_commit(),
         }
     }
 
@@ -336,7 +331,6 @@ pub struct CommitPreparation {
 - Amend: Load HEAD commit message
 - Extend: No message needed (--no-edit)
 - Reword: Load HEAD message (but only change message)
-- NoVerify: Same as normal, but set flag
 
 ## Implementation Order
 

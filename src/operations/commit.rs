@@ -91,7 +91,6 @@ impl<'repo> CommitOperations<'repo> {
             CommitMode::Amend => self.prepare_amend_commit(),
             CommitMode::Extend => self.prepare_extend_commit(),
             CommitMode::Reword => self.prepare_reword_commit(),
-            CommitMode::NoVerify => self.prepare_no_verify_commit(),
         }
     }
 
@@ -144,20 +143,6 @@ impl<'repo> CommitOperations<'repo> {
             message_template: head_message,
             flags: CommitFlags {
                 amend: true,
-                ..Default::default()
-            },
-        })
-    }
-
-    /// Prepares a commit without running hooks
-    fn prepare_no_verify_commit(&self) -> Result<CommitPreparation, RepositoryError> {
-        let message_template = self.get_commit_template()?;
-
-        Ok(CommitPreparation {
-            mode: CommitMode::NoVerify,
-            message_template,
-            flags: CommitFlags {
-                no_verify: true,
                 ..Default::default()
             },
         })
@@ -386,18 +371,6 @@ mod tests {
                 .message_template
                 .contains("Please enter the commit message")
         );
-    }
-
-    #[test]
-    fn test_prepare_no_verify_commit() {
-        let (repo, _temp_dir) = create_test_repo("no_verify");
-        let commit_ops = CommitOperations::new(&repo);
-
-        let preparation = commit_ops.prepare_no_verify_commit().unwrap();
-
-        assert!(matches!(preparation.mode, CommitMode::NoVerify));
-        assert!(preparation.flags.no_verify);
-        assert!(!preparation.flags.amend);
     }
 
     #[test]
