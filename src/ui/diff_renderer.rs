@@ -81,7 +81,13 @@ impl<'a> DiffRenderer<'a> {
             LineType::NoNewlineEOF => self.config.theme.diff_no_newline,
         };
 
-        let mut content_style = Style::default().fg(color);
+        // For lines with inline diff, use default foreground (to avoid color-on-color).
+        // For lines without inline diff, use the theme color.
+        let mut content_style = if diff_line.inline_diff.is_some() {
+            Style::default()
+        } else {
+            Style::default().fg(color)
+        };
         let mut gutter_style = Style::default().fg(gutter_color);
         if matches!(diff_line.line_type, LineType::Context) && !is_active_hunk {
             content_style = content_style.add_modifier(Modifier::DIM);

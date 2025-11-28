@@ -30,8 +30,10 @@ impl<'a> InlineDiffRenderer<'a> {
             let expanded = self.expand_segment_with_tabs(&segment.content, &mut col);
             let mut style = match segment.change {
                 InlineChange::Unchanged => base_style,
-                InlineChange::Added => base_style.bg(self.config.theme.diff_inline_addition),
-                InlineChange::Removed => base_style.bg(self.config.theme.diff_inline_deletion),
+                InlineChange::Added => Style::default().bg(self.config.theme.diff_inline_addition),
+                InlineChange::Removed => {
+                    Style::default().bg(self.config.theme.diff_inline_deletion)
+                }
             };
             if matches!(segment.change, InlineChange::Added | InlineChange::Removed) {
                 style = style.add_modifier(Modifier::BOLD);
@@ -93,18 +95,24 @@ mod tests {
             ],
         };
 
-        let spans = renderer.inline_content_spans(&inline_diff, Style::default(), "+");
+        let base_style = Style::default().fg(config.theme.staged);
+        let spans = renderer.inline_content_spans(&inline_diff, base_style, "+");
 
         assert_eq!(spans[0].content, "+");
         assert_eq!(spans[1].content, "ab  "); // tab expands to next multiple of 4
         assert_eq!(spans[2].content, "X");
         assert_eq!(spans[3].content, "Y");
 
+        // Highlighted segments have background only, no foreground color
         assert_eq!(spans[2].style.bg, Some(config.theme.diff_inline_addition));
+        assert_eq!(spans[2].style.fg, None);
         assert!(spans[2].style.add_modifier.contains(Modifier::BOLD));
         assert_eq!(spans[3].style.bg, Some(config.theme.diff_inline_deletion));
+        assert_eq!(spans[3].style.fg, None);
         assert!(spans[3].style.add_modifier.contains(Modifier::BOLD));
+        // Unchanged segments keep base style
         assert!(spans[1].style.bg.is_none());
+        assert_eq!(spans[1].style.fg, Some(config.theme.staged));
     }
 
     #[test]
