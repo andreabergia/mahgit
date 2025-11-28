@@ -36,14 +36,9 @@ impl<'a, 'b> DiffRenderContext<'a, 'b> {
         let syntax_highlighter = syntax_highlighter();
         let (syntax_ref, highlighter) =
             if let Some(syntax) = syntax_highlighter.detect_syntax(&diff.file_path) {
-                eprintln!(
-                    "[SYNTAX] Detected {} syntax for file: {}",
-                    syntax.name, diff.file_path
-                );
                 let highlighter = syntax_highlighter.create_highlighter(syntax);
                 (Some(syntax), Some(highlighter))
             } else {
-                eprintln!("[SYNTAX] No syntax detected for file: {}", diff.file_path);
                 (None, None)
             };
 
