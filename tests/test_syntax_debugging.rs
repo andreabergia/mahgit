@@ -105,7 +105,7 @@ fn test_diff_renderer_has_syntax_highlighter() {
     let lines = renderer.generate_diff_lines(&diff, Some(0), None);
 
     println!("Generated {} lines", lines.len());
-    assert!(lines.len() > 0, "Should generate lines");
+    assert!(!lines.is_empty(), "Should generate lines");
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn test_render_context_detects_syntax() {
     let renderer = DiffRenderer::new(&config);
     let diff = create_rust_diff();
 
-    let context = DiffRenderContext::new(&renderer, &diff);
+    let _context = DiffRenderContext::new(&renderer, &diff);
     println!("✓ DiffRenderContext created for test.rs");
 
     // The context should have detected Rust syntax internally

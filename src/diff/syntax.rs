@@ -18,12 +18,12 @@ impl SyntaxHighlighter {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();
 
-        // Use Solarized (dark) which is designed for dark terminals
-        // This theme has good contrast and visibility
+        // Use base16-ocean.dark theme for dark terminals
+        // This provides good syntax highlighting with colors designed for dark backgrounds
         let theme = theme_set
             .themes
-            .get("Solarized (dark)")
-            .or_else(|| theme_set.themes.get("base16-eighties.dark"))
+            .get("base16-ocean.dark")
+            .or_else(|| theme_set.themes.get("Solarized (dark)"))
             .expect("At least one theme should be available")
             .clone();
 
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn test_create_highlighter() {
         let highlighter = SyntaxHighlighter::new();
-        assert!(highlighter.syntax_set.syntaxes().len() > 0);
+        assert!(!highlighter.syntax_set.syntaxes().is_empty());
     }
 
     #[test]
@@ -122,7 +122,7 @@ mod tests {
         let line = "fn main() {";
         let spans = highlighter.highlight_line(line, syntax, &mut highlight_lines);
 
-        assert!(spans.len() > 0);
+        assert!(!spans.is_empty());
         // Verify that we get multiple spans with different colors
         // (syntax highlighting should split the line into multiple colored segments)
         assert!(spans.iter().any(|(text, _)| text.contains("fn")));

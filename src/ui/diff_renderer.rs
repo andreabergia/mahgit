@@ -37,12 +37,18 @@ impl<'a, 'b> DiffRenderContext<'a, 'b> {
         let (syntax_ref, highlighter) =
             if let Some(syntax_highlighter) = &renderer.syntax_highlighter {
                 if let Some(syntax) = syntax_highlighter.detect_syntax(&diff.file_path) {
+                    eprintln!(
+                        "[SYNTAX] Detected {} syntax for file: {}",
+                        syntax.name, diff.file_path
+                    );
                     let highlighter = syntax_highlighter.create_highlighter(syntax);
                     (Some(syntax), Some(highlighter))
                 } else {
+                    eprintln!("[SYNTAX] No syntax detected for file: {}", diff.file_path);
                     (None, None)
                 }
             } else {
+                eprintln!("[SYNTAX] No syntax highlighter available");
                 (None, None)
             };
 
@@ -147,16 +153,28 @@ impl<'a> DiffRenderer<'a> {
             LineType::NoNewlineEOF => self.config.theme.diff_no_newline,
         };
 
+        // Create base style for content - will be used differently depending on whether
+        // we have syntax highlighting or not
+        // Always prefer syntax highlighting over inline diffs when available
+        let has_syntax = syntax_state.is_some();
+
         // For lines with inline diff, use default foreground (to avoid color-on-color).
-        // For lines without inline diff, use the theme color.
-        let mut content_style = if diff_line.inline_diff.is_some() {
+        // For lines without inline diff:
+        //   - If we have syntax highlighting, use default foreground (syntax will provide colors)
+        //   - If no syntax highlighting, use the theme color
+        let mut content_style = if diff_line.inline_diff.is_some() || has_syntax {
             Style::default()
         } else {
             Style::default().fg(color)
         };
+
+        // Create a separate style for the line prefix that always has the diff color
+        let mut prefix_style = Style::default().fg(color);
+
         let mut gutter_style = Style::default().fg(gutter_color);
         if matches!(diff_line.line_type, LineType::Context) && !is_active_hunk {
             content_style = content_style.add_modifier(Modifier::DIM);
+            prefix_style = prefix_style.add_modifier(Modifier::DIM);
             gutter_style = gutter_style.add_modifier(Modifier::DIM);
         }
 
@@ -164,7 +182,12 @@ impl<'a> DiffRenderer<'a> {
             gutter_style = gutter_style.bg(self.config.theme.diff_gutter_focused);
         }
 
-        content_style = self.apply_hunk_highlight(content_style, is_active_hunk);
+        // Only apply hunk highlighting if we don't have syntax highlighting
+        // (syntax colors need default background for proper contrast)
+        if !has_syntax {
+            content_style = self.apply_hunk_highlight(content_style, is_active_hunk);
+        }
+        prefix_style = self.apply_hunk_highlight(prefix_style, is_active_hunk);
         gutter_style = self.apply_hunk_highlight(gutter_style, is_active_hunk);
 
         // Expand tabs in the line content
@@ -203,31 +226,30 @@ impl<'a> DiffRenderer<'a> {
             self.apply_hunk_highlight(Style::default(), is_active_hunk),
         ));
 
-        let content_spans = if let Some(inline_diff) = &diff_line.inline_diff {
-            // For lines with inline diffs, skip syntax highlighting
-            // to keep the word-level change highlighting clear
-            let renderer = InlineDiffRenderer::new(self.config);
-            renderer.inline_content_spans(inline_diff, content_style, line_prefix)
-        } else if let Some((syntax_ref, highlighter)) = syntax_state {
-            // Apply syntax highlighting if available
+        let content_spans = if let Some((syntax_ref, highlighter)) = syntax_state {
+            // Prefer syntax highlighting over inline diffs when available
             if let Some(syntax_highlighter) = &self.syntax_highlighter {
                 let highlighted =
                     syntax_highlighter.highlight_line(&expanded_content, syntax_ref, highlighter);
 
-                let mut result = vec![Span::styled(line_prefix.to_string(), content_style)];
+                // Use prefix_style for the line prefix to show diff color (green/red)
+                let mut result = vec![Span::styled(line_prefix.to_string(), prefix_style)];
 
+                // Determine background color based on line type
+                let bg_color = match diff_line.line_type {
+                    LineType::Addition => Some(self.config.theme.diff_inline_addition),
+                    LineType::Deletion => Some(self.config.theme.diff_inline_deletion),
+                    LineType::Context => None,
+                    LineType::NoNewlineEOF => None,
+                };
+
+                // Apply syntax colors to foreground AND diff backgrounds to content
                 for (text, syntax_color) in highlighted {
-                    // Apply syntax color as foreground, starting from a clean style
-                    let mut span_style = Style::default().fg(syntax_color);
-                    // Preserve any modifiers (like DIM) from content_style
-                    if content_style.add_modifier.contains(Modifier::DIM) {
-                        span_style = span_style.add_modifier(Modifier::DIM);
+                    let mut style = Style::default().fg(syntax_color);
+                    if let Some(bg) = bg_color {
+                        style = style.bg(bg);
                     }
-                    // Preserve background color from content_style (for hunk highlighting)
-                    if let Some(bg) = content_style.bg {
-                        span_style = span_style.bg(bg);
-                    }
-                    result.push(Span::styled(text, span_style));
+                    result.push(Span::styled(text, style));
                 }
 
                 result
@@ -238,8 +260,12 @@ impl<'a> DiffRenderer<'a> {
                     content_style,
                 )]
             }
+        } else if let Some(inline_diff) = &diff_line.inline_diff {
+            // Fall back to inline diffs for word-level change highlighting
+            let renderer = InlineDiffRenderer::new(self.config);
+            renderer.inline_content_spans(inline_diff, content_style, line_prefix)
         } else {
-            // No syntax highlighting or inline diff
+            // No syntax highlighting or inline diff - plain styling
             vec![Span::styled(
                 format!("{}{}", line_prefix, expanded_content),
                 content_style,
