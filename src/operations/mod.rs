@@ -1,6 +1,8 @@
 pub mod commit;
+pub mod discard;
 pub mod editor;
 pub mod staging;
+pub use discard::*;
 pub use staging::*;
 
 #[derive(Debug, Clone)]

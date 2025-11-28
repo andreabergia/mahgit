@@ -31,6 +31,8 @@ pub enum Command {
     StageFile,
     UnstageFile,
     AddUntracked,
+    DiscardFile,
+    ConfirmDiscard, // Internal command after confirmation
 
     // View commands
     EnterDiffView,
@@ -281,6 +283,7 @@ impl InputHandler {
                     's' => Command::StageFile,
                     'u' => Command::UnstageFile,
                     'a' => Command::AddUntracked,
+                    'x' => Command::DiscardFile,
                     'f' => Command::PageDiffDown,
                     'b' => Command::PageDiffUp,
                     'n' => Command::JumpToNextHunk,
@@ -406,6 +409,7 @@ impl InputHandler {
             "  s       Stage file or current diff hunk",
             "  u       Unstage file or current diff hunk",
             "  a       Add untracked file",
+            "  x       Discard file or current diff hunk",
             "",
             "Commits:",
             "  cc      Create new commit",
@@ -549,8 +553,8 @@ mod tests {
         );
 
         // Test that unknown sequences return Unknown for both keys
-        let x_key = KeyEvent {
-            code: KeyCode::Char('x'),
+        let z_key = KeyEvent {
+            code: KeyCode::Char('z'),
             modifiers: KeyModifiers::NONE,
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
@@ -565,7 +569,7 @@ mod tests {
 
         // First key of unknown sequence
         assert_eq!(
-            handler.handle_key(x_key),
+            handler.handle_key(z_key),
             InputResult::Command(Command::Unknown)
         );
         // Second key of unknown sequence

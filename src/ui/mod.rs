@@ -44,8 +44,8 @@ pub struct App {
     active_modal: Option<BoxedModal>,
     /// Modal context for tracking what modal system is active
     modal_context: ModalContext,
-    /// Pending commit preparation (set when opening editor for commit)
-    pending_commit: Option<CommitPreparation>,
+    /// Pending operation (set when showing modal that requires confirmation or additional input)
+    pending_operation: Option<PendingOperation>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -63,6 +63,17 @@ enum VerticalDirection {
     Down,
 }
 
+#[derive(Clone)]
+enum PendingDiscard {
+    File { path: String },
+    Hunk { path: String, hunk_index: usize },
+}
+
+enum PendingOperation {
+    Commit(CommitPreparation),
+    Discard(PendingDiscard),
+}
+
 impl App {
     pub fn new(repository: Repository, status: RepositoryStatus, config: Config) -> Self {
         let navigation = NavigationState::new(&status);
@@ -78,7 +89,7 @@ impl App {
             config: Arc::new(config),
             active_modal: None,
             modal_context: ModalContext::None,
-            pending_commit: None,
+            pending_operation: None,
         }
     }
 
@@ -122,10 +133,14 @@ impl App {
         // If modal is active, route keys to modal first
         if self.modal_context != ModalContext::None {
             match key_event.code {
-                KeyCode::Esc => self.close_modal(),
+                KeyCode::Esc => self.cancel_modal(),
                 KeyCode::Char(c) if key_event.modifiers == KeyModifiers::NONE => {
                     // Try to handle the key in the modal
-                    let _ = self.handle_modal_input(c);
+                    if !self.handle_modal_input(c) {
+                        // Key not handled by modal (e.g., 'n' for cancel)
+                        // Close the modal without executing any command
+                        self.cancel_modal();
+                    }
                 }
                 _ => {} // Ignore other keys in modal mode
             }
@@ -210,7 +225,9 @@ impl App {
                         Ok(success) => {
                             if success {
                                 // Check if this was a commit operation
-                                if let Some(preparation) = self.pending_commit.take() {
+                                if let Some(PendingOperation::Commit(preparation)) =
+                                    self.pending_operation.take()
+                                {
                                     use std::path::PathBuf;
                                     let temp_file = PathBuf::from(&file_path);
 
@@ -259,8 +276,11 @@ impl App {
                                 }
                             } else {
                                 // Editor exited with error - clean up commit state if any
-                                if self.pending_commit.is_some() {
-                                    self.pending_commit = None;
+                                if matches!(
+                                    self.pending_operation,
+                                    Some(PendingOperation::Commit(_))
+                                ) {
+                                    self.pending_operation = None;
                                     self.feedback_manager.show_result(
                                         crate::operations::OperationResult::new(
                                             "Commit aborted: editor exited with error".to_string(),
@@ -277,8 +297,8 @@ impl App {
                         }
                         Err(err) => {
                             // Clean up commit state if any
-                            if self.pending_commit.is_some() {
-                                self.pending_commit = None;
+                            if matches!(self.pending_operation, Some(PendingOperation::Commit(_))) {
+                                self.pending_operation = None;
                             }
                             self.feedback_manager.show_result(
                                 crate::operations::OperationResult::new(format!(
@@ -367,6 +387,12 @@ impl App {
             }
             Command::AddUntracked => {
                 self.add_selected_file();
+            }
+            Command::DiscardFile => {
+                self.discard_selected_file();
+            }
+            Command::ConfirmDiscard => {
+                self.execute_confirmed_discard();
             }
             Command::EnterDiffView => {
                 self.toggle_inline_diff();
@@ -474,6 +500,192 @@ impl App {
 
     fn add_selected_file(&mut self) {
         self.execute_staging_operation(|ops, path| ops.add_untracked_file(path), "add");
+    }
+
+    fn discard_selected_file(&mut self) {
+        // Check if we're operating on a hunk
+        if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+            // Check context - only allow for unstaged, untracked, and conflicted files
+            use navigation::FileContext;
+            match selected_file.context {
+                FileContext::Staged => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(
+                            "Cannot discard staged file. Unstage first with 'u'.".to_string(),
+                        ));
+                }
+                FileContext::Unstaged | FileContext::Conflicted => {
+                    // Check if operating on hunk
+                    if self.inline_hunk_applicable_for_discard() {
+                        self.show_discard_hunk_confirmation();
+                        return;
+                    }
+                    // Otherwise, show confirmation for the whole file
+                    self.show_discard_file_confirmation(&selected_file);
+                }
+                FileContext::Untracked => {
+                    // For untracked files, show confirmation
+                    self.show_discard_file_confirmation(&selected_file);
+                }
+            }
+        }
+    }
+
+    fn show_discard_file_confirmation(&mut self, selected_file: &SelectedFile) {
+        use navigation::FileContext;
+        let is_tracked = !matches!(selected_file.context, FileContext::Untracked);
+
+        let message = if is_tracked {
+            format!("Discard all changes to '{}'?", selected_file.path)
+        } else {
+            format!(
+                "Delete untracked file '{}'? (Cannot be undone)",
+                selected_file.path
+            )
+        };
+
+        self.pending_operation = Some(PendingOperation::Discard(PendingDiscard::File {
+            path: selected_file.path.clone(),
+        }));
+
+        let modal = modals::ConfirmModal::new(message, Command::ConfirmDiscard);
+        self.active_modal = Some(Box::new(modal));
+        self.modal_context = ModalContext::Confirm;
+    }
+
+    fn show_discard_hunk_confirmation(&mut self) {
+        if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+            let diff_key = FileDiffKey::new(selected_file.path.clone(), selected_file.context);
+            if let Some(state) = self.navigation.get_file_diff(&diff_key) {
+                let current_hunk = match self.navigation.current_cursor() {
+                    Some(SelectionCursor::Hunk { hunk_index, .. }) => hunk_index,
+                    _ => state.current_hunk,
+                };
+
+                if let Some(diff) = &state.diff
+                    && current_hunk < diff.hunks.len()
+                {
+                    let hunk = &diff.hunks[current_hunk];
+                    let message = format!(
+                        "Discard hunk in '{}' (lines {}-{})?",
+                        selected_file.path,
+                        hunk.header.old_start,
+                        hunk.header.old_start + hunk.header.old_lines
+                    );
+
+                    self.pending_operation =
+                        Some(PendingOperation::Discard(PendingDiscard::Hunk {
+                            path: selected_file.path.clone(),
+                            hunk_index: current_hunk,
+                        }));
+
+                    let modal = modals::ConfirmModal::new(message, Command::ConfirmDiscard);
+                    self.active_modal = Some(Box::new(modal));
+                    self.modal_context = ModalContext::Confirm;
+                }
+            }
+        }
+    }
+
+    fn execute_confirmed_discard(&mut self) {
+        let Some(PendingOperation::Discard(pending)) = self.pending_operation.take() else {
+            return;
+        };
+
+        match pending {
+            PendingDiscard::File { path, .. } => {
+                let discard_ops = crate::operations::DiscardOperations::new(&self.repository);
+                match discard_ops.discard_file(&path) {
+                    Ok(result) => {
+                        self.feedback_manager.show_result(result);
+                        self.refresh_status_after_operation();
+                    }
+                    Err(err) => {
+                        self.feedback_manager
+                            .show_result(crate::operations::OperationResult::new(format!(
+                                "Failed to discard {}: {}",
+                                path, err
+                            )));
+                    }
+                }
+            }
+            PendingDiscard::Hunk { path, hunk_index } => {
+                self.execute_discard_hunk(&path, hunk_index);
+            }
+        }
+    }
+
+    fn execute_discard_hunk(&mut self, path: &str, hunk_index: usize) {
+        if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+            let diff_key = FileDiffKey::new(selected_file.path.clone(), selected_file.context);
+            if let Some(state) = self.navigation.get_file_diff(&diff_key)
+                && let Some(diff) = &state.diff
+                && let Some(hunk) = diff.hunks.get(hunk_index)
+            {
+                let discarder = crate::operations::HunkDiscarder::new(&self.repository);
+                match discarder.discard_hunk(path, hunk) {
+                    Ok(result) => {
+                        let prev_ctx = state.diff_context.clone();
+                        self.feedback_manager.show_result(result);
+                        self.refresh_status_after_operation();
+
+                        // Refresh the diff
+                        let diff_generator =
+                            crate::diff::DiffGenerator::new(self.repository.git2_repo());
+                        if let Ok(new_diff) =
+                            diff_generator.generate_diff(&diff_key.path, prev_ctx.clone())
+                        {
+                            self.navigation
+                                .set_file_diff(diff_key.clone(), new_diff, prev_ctx);
+
+                            // Update cursor position
+                            if let Some((section, file_index, _)) =
+                                self.navigation.cursor_position()
+                                && let Some(state2) = self.navigation.get_file_diff(&diff_key)
+                            {
+                                let len = state2.diff.as_ref().map(|d| d.hunks.len()).unwrap_or(0);
+                                let next_cursor = if len == 0 {
+                                    SelectionCursor::File {
+                                        section,
+                                        file_index,
+                                    }
+                                } else {
+                                    SelectionCursor::Hunk {
+                                        section,
+                                        file_index,
+                                        hunk_index: hunk_index.min(len.saturating_sub(1)),
+                                    }
+                                };
+
+                                self.navigation
+                                    .apply_cursor(&self.status, Some(next_cursor));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.feedback_manager
+                            .show_result(crate::operations::OperationResult::new(format!(
+                                "Hunk discard failed: {}",
+                                e
+                            )));
+                    }
+                }
+            }
+        }
+    }
+
+    fn inline_hunk_applicable_for_discard(&self) -> bool {
+        if !self.is_inline_diff_focused() {
+            return false;
+        }
+        if let Some(selected) = self.navigation.get_selected_file(&self.status) {
+            use navigation::FileContext;
+            return matches!(
+                selected.context,
+                FileContext::Unstaged | FileContext::Conflicted
+            );
+        }
+        false
     }
 
     fn refresh_status_after_operation(&mut self) {
@@ -1199,7 +1411,7 @@ impl App {
                 // Convert PathBuf to String
                 if let Some(file_path_str) = temp_file.to_str() {
                     self.pending_editor_file = Some(file_path_str.to_string());
-                    self.pending_commit = Some(preparation);
+                    self.pending_operation = Some(PendingOperation::Commit(preparation));
                 } else {
                     self.feedback_manager
                         .show_result(crate::operations::OperationResult::new(
@@ -1230,6 +1442,12 @@ impl App {
     fn close_modal(&mut self) {
         self.active_modal = None;
         self.modal_context = ModalContext::None;
+    }
+
+    fn cancel_modal(&mut self) {
+        self.close_modal();
+        // Clear any pending operations when modal is cancelled
+        self.pending_operation = None;
     }
 
     /// Handle input when a modal is active
@@ -1517,9 +1735,15 @@ mod tests {
         // Verify pending_editor_file was set
         assert!(app.pending_editor_file.is_some());
 
-        // Verify pending_commit was set
-        assert!(app.pending_commit.is_some());
-        let pending = app.pending_commit.as_ref().unwrap();
+        // Verify pending_operation was set
+        assert!(matches!(
+            app.pending_operation,
+            Some(PendingOperation::Commit(_))
+        ));
+        let pending = match &app.pending_operation {
+            Some(PendingOperation::Commit(prep)) => prep,
+            _ => panic!("Expected pending commit operation"),
+        };
         assert_eq!(pending.mode, input::CommitMode::Normal);
         assert!(!pending.flags.no_edit);
     }
@@ -1551,7 +1775,7 @@ mod tests {
 
         // Verify no editor file was set (extend executes immediately)
         assert!(app.pending_editor_file.is_none());
-        assert!(app.pending_commit.is_none());
+        assert!(app.pending_operation.is_none());
 
         // Verify commit was created (check feedback message contains "Extended commit")
         let feedback = app.feedback_manager.get_current_message();
@@ -1583,7 +1807,7 @@ mod tests {
 
         // Verify no editor file was set
         assert!(app.pending_editor_file.is_none());
-        assert!(app.pending_commit.is_none());
+        assert!(app.pending_operation.is_none());
 
         // Verify the operation was rejected with appropriate message
         let feedback = app.feedback_manager.get_current_message();

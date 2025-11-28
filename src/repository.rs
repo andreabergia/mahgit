@@ -145,6 +145,70 @@ impl Repository {
     pub fn git2_repo(&self) -> &Git2Repository {
         &self.git_repo
     }
+
+    /// Check if a file is tracked in the repository (exists in HEAD)
+    pub fn is_tracked(&self, path: &str) -> Result<bool, RepositoryError> {
+        // Get HEAD commit
+        let head = match self.git_repo.head() {
+            Ok(head) => head,
+            Err(e) if e.code() == git2::ErrorCode::UnbornBranch => {
+                // Repository has no commits yet, so no files are tracked
+                return Ok(false);
+            }
+            Err(e) => {
+                return Err(RepositoryError::Other(format!(
+                    "Failed to get HEAD: {}",
+                    e.message()
+                )));
+            }
+        };
+
+        let commit = head
+            .peel_to_commit()
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        let tree = commit
+            .tree()
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        // Check if the path exists in the tree
+        let file_path = std::path::Path::new(path);
+        Ok(tree.get_path(file_path).is_ok())
+    }
+
+    /// Discard changes to a file in the working directory
+    /// For tracked files: restores the file to the version in the index
+    /// For untracked files: deletes the file
+    pub fn discard_file(&self, path: &str) -> Result<(), RepositoryError> {
+        let is_tracked = self.is_tracked(path)?;
+
+        if is_tracked {
+            // For tracked files, use git2's checkout to restore from index
+            let mut checkout_builder = git2::build::CheckoutBuilder::new();
+            checkout_builder.force().update_only(true).path(path);
+
+            self.git_repo
+                .checkout_index(None, Some(&mut checkout_builder))
+                .map_err(|e| {
+                    RepositoryError::Other(format!("Failed to discard file: {}", e.message()))
+                })?;
+        } else {
+            // For untracked files, delete them
+            let workdir = self.git_repo.workdir().ok_or_else(|| {
+                RepositoryError::Other("Repository has no working directory".to_string())
+            })?;
+            let file_path = workdir.join(path);
+
+            std::fs::remove_file(&file_path).map_err(|e| {
+                RepositoryError::IoError(std::io::Error::new(
+                    e.kind(),
+                    format!("Failed to delete untracked file '{}': {}", path, e),
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

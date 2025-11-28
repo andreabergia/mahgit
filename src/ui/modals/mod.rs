@@ -1,6 +1,8 @@
 pub mod commit;
+pub mod confirm;
 
 pub use commit::CommitModal;
+pub use confirm::ConfirmModal;
 
 use crate::config::Config;
 use crate::ui::input::Command;
@@ -17,6 +19,7 @@ use ratatui::{
 pub enum ModalContext {
     None,
     Commit,
+    Confirm,
     // Future: Branch, Push, Pull, Log, etc.
 }
 
