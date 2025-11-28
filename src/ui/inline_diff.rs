@@ -2,10 +2,7 @@ use crate::{
     config::Config,
     diff::{InlineChange, InlineDiff},
 };
-use ratatui::{
-    style::{Modifier, Style},
-    text::Span,
-};
+use ratatui::{style::Style, text::Span};
 
 pub struct InlineDiffRenderer<'a> {
     config: &'a Config,
@@ -28,16 +25,13 @@ impl<'a> InlineDiffRenderer<'a> {
         let mut col = 0usize;
         for segment in &inline_diff.segments {
             let expanded = self.expand_segment_with_tabs(&segment.content, &mut col);
-            let mut style = match segment.change {
+            let style = match segment.change {
                 InlineChange::Unchanged => base_style,
                 InlineChange::Added => Style::default().bg(self.config.theme.diff_inline_addition),
                 InlineChange::Removed => {
                     Style::default().bg(self.config.theme.diff_inline_deletion)
                 }
             };
-            if matches!(segment.change, InlineChange::Added | InlineChange::Removed) {
-                style = style.add_modifier(Modifier::BOLD);
-            }
             spans.push(Span::styled(expanded, style));
         }
 
@@ -64,7 +58,6 @@ impl<'a> InlineDiffRenderer<'a> {
 mod tests {
     use super::*;
     use crate::{config::Config, diff::InlineDiffSegment, theme::Theme};
-    use ratatui::style::Modifier;
 
     fn test_config() -> Config {
         Config {
@@ -106,10 +99,8 @@ mod tests {
         // Highlighted segments have background only, no foreground color
         assert_eq!(spans[2].style.bg, Some(config.theme.diff_inline_addition));
         assert_eq!(spans[2].style.fg, None);
-        assert!(spans[2].style.add_modifier.contains(Modifier::BOLD));
         assert_eq!(spans[3].style.bg, Some(config.theme.diff_inline_deletion));
         assert_eq!(spans[3].style.fg, None);
-        assert!(spans[3].style.add_modifier.contains(Modifier::BOLD));
         // Unchanged segments keep base style
         assert!(spans[1].style.bg.is_none());
         assert_eq!(spans[1].style.fg, Some(config.theme.staged));
