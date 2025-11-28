@@ -136,11 +136,14 @@ fn test_formatted_line_has_syntax_colors() {
     };
     let renderer = DiffRenderer::new(&config);
     let diff = create_rust_diff();
-    let mut context = DiffRenderContext::new(&renderer, &diff);
+    let context = DiffRenderContext::new(&renderer, &diff);
+
+    // Create a fresh highlighter for this hunk
+    let mut highlighter = context.create_fresh_highlighter();
 
     // Format the first content line: "fn main() {"
     let line = &diff.hunks[0].lines[0];
-    let formatted = context.format_diff_line(line, true, None);
+    let formatted = context.format_diff_line(line, true, None, highlighter.as_mut());
 
     println!("Original: '{}'", line.content);
     println!("Formatted into {} spans:", formatted.spans.len());
@@ -194,13 +197,16 @@ fn test_addition_line_has_syntax_colors() {
     };
     let renderer = DiffRenderer::new(&config);
     let diff = create_rust_diff();
-    let mut context = DiffRenderContext::new(&renderer, &diff);
+    let context = DiffRenderContext::new(&renderer, &diff);
+
+    // Create a fresh highlighter for this hunk
+    let mut highlighter = context.create_fresh_highlighter();
 
     // Format an addition line: "    let x = 42;"
     let line = &diff.hunks[0].lines[1];
     assert_eq!(line.line_type, LineType::Addition);
 
-    let formatted = context.format_diff_line(line, true, None);
+    let formatted = context.format_diff_line(line, true, None, highlighter.as_mut());
 
     println!("Original: '{}'", line.content);
     println!("Line type: Addition (+)");

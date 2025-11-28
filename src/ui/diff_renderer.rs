@@ -22,7 +22,6 @@ pub struct DiffRenderContext<'a> {
     renderer: &'a DiffRenderer<'a>,
     line_number_widths: Option<LineNumberWidths>,
     syntax_ref: Option<&'static SyntaxReference>,
-    highlighter: Option<HighlightLines<'static>>,
 }
 
 impl<'a> DiffRenderContext<'a> {
@@ -34,34 +33,36 @@ impl<'a> DiffRenderContext<'a> {
         };
 
         let syntax_highlighter = syntax_highlighter();
-        let (syntax_ref, highlighter) =
-            if let Some(syntax) = syntax_highlighter.detect_syntax(&diff.file_path) {
-                let highlighter = syntax_highlighter.create_highlighter(syntax);
-                (Some(syntax), Some(highlighter))
-            } else {
-                (None, None)
-            };
+        let syntax_ref = syntax_highlighter.detect_syntax(&diff.file_path);
 
         Self {
             renderer,
             line_number_widths,
             syntax_ref,
-            highlighter,
         }
     }
 
+    /// Create a fresh highlighter instance for a hunk.
+    /// This prevents syntax highlighting state from leaking between hunks.
+    pub fn create_fresh_highlighter(&self) -> Option<HighlightLines<'static>> {
+        self.syntax_ref.map(|syntax| {
+            let syntax_highlighter = syntax_highlighter();
+            syntax_highlighter.create_highlighter(syntax)
+        })
+    }
+
     pub fn format_diff_line(
-        &mut self,
+        &self,
         diff_line: &DiffLine,
         is_active_hunk: bool,
         prefix: Option<&str>,
+        highlighter: Option<&mut HighlightLines<'static>>,
     ) -> Line<'static> {
-        let syntax_state =
-            if let (Some(syntax), Some(hl)) = (self.syntax_ref, &mut self.highlighter) {
-                Some((syntax, hl))
-            } else {
-                None
-            };
+        let syntax_state = if let (Some(syntax), Some(hl)) = (self.syntax_ref, highlighter) {
+            Some((syntax, hl))
+        } else {
+            None
+        };
 
         self.renderer.format_diff_line(
             diff_line,
@@ -263,7 +264,7 @@ impl<'a> DiffRenderer<'a> {
         active_hunk_index: Option<usize>,
         prefix: Option<&str>,
     ) -> Vec<Line<'static>> {
-        let mut context = DiffRenderContext::new(self, diff);
+        let context = DiffRenderContext::new(self, diff);
         let mut lines = Vec::new();
 
         for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
@@ -284,9 +285,17 @@ impl<'a> DiffRenderer<'a> {
 
             lines.push(header_line);
 
+            // Create a fresh highlighter for this hunk to prevent state leakage
+            let mut highlighter = context.create_fresh_highlighter();
+
             // Add diff lines
             for diff_line in &hunk.lines {
-                let line = context.format_diff_line(diff_line, is_current_hunk, prefix);
+                let line = context.format_diff_line(
+                    diff_line,
+                    is_current_hunk,
+                    prefix,
+                    highlighter.as_mut(),
+                );
                 lines.push(line);
             }
         }
@@ -460,6 +469,191 @@ mod tests {
         assert_eq!(
             line_with_highlight.spans[0].style.bg,
             Some(config.theme.diff_hunk_highlight)
+        );
+    }
+
+    /// Test that demonstrates the syntax highlighting state corruption bug.
+    ///
+    /// This test creates a diff with two hunks separated by a gap in line numbers.
+    /// Hunk 1 ends with a line that opens a multi-line comment.
+    /// Hunk 2 (30 lines later) has code that should NOT be inside a comment.
+    ///
+    /// CURRENT BUG: The HighlightLines state from hunk 1 carries over to hunk 2,
+    /// causing hunk 2's code to be incorrectly highlighted as if it's inside the comment.
+    #[test]
+    fn test_syntax_highlighting_state_corruption_across_hunks() {
+        let config = test_config();
+        let renderer = DiffRenderer::new(&config);
+
+        // Create a diff for a Rust file with two hunks separated by a gap
+        let diff = Diff {
+            file_path: "test.rs".to_string(),
+            context: DiffContext::WorkingTreeToIndex,
+            binary: false,
+            hunks: vec![
+                // Hunk 1: Lines 10-15, ends with opening a multi-line comment
+                DiffHunk {
+                    header: HunkHeader {
+                        raw: "@@ -10,3 +10,3 @@".to_string(),
+                        old_start: 10,
+                        old_lines: 3,
+                        new_start: 10,
+                        new_lines: 3,
+                    },
+                    old_range: LineRange {
+                        start: 10,
+                        count: 3,
+                    },
+                    new_range: LineRange {
+                        start: 10,
+                        count: 3,
+                    },
+                    stageable: true,
+                    context_lines: 3,
+                    lines: vec![
+                        DiffLine {
+                            content: "fn foo() {".to_string(),
+                            line_type: LineType::Context,
+                            old_line_no: Some(10),
+                            new_line_no: Some(10),
+                            inline_diff: None,
+                        },
+                        DiffLine {
+                            content: "    let x = 5;".to_string(),
+                            line_type: LineType::Deletion,
+                            old_line_no: Some(11),
+                            new_line_no: None,
+                            inline_diff: None,
+                        },
+                        DiffLine {
+                            content: "    /* Start of a comment".to_string(),
+                            line_type: LineType::Addition,
+                            old_line_no: None,
+                            new_line_no: Some(11),
+                            inline_diff: None,
+                        },
+                        DiffLine {
+                            content: "}".to_string(),
+                            line_type: LineType::Context,
+                            old_line_no: Some(12),
+                            new_line_no: Some(12),
+                            inline_diff: None,
+                        },
+                    ],
+                },
+                // Hunk 2: Lines 50-52 (30 lines later, gap in between)
+                // This code is OUTSIDE the multi-line comment in the actual file
+                DiffHunk {
+                    header: HunkHeader {
+                        raw: "@@ -50,3 +50,3 @@".to_string(),
+                        old_start: 50,
+                        old_lines: 3,
+                        new_start: 50,
+                        new_lines: 3,
+                    },
+                    old_range: LineRange {
+                        start: 50,
+                        count: 3,
+                    },
+                    new_range: LineRange {
+                        start: 50,
+                        count: 3,
+                    },
+                    stageable: true,
+                    context_lines: 3,
+                    lines: vec![
+                        DiffLine {
+                            content: "fn bar() {".to_string(),
+                            line_type: LineType::Context,
+                            old_line_no: Some(50),
+                            new_line_no: Some(50),
+                            inline_diff: None,
+                        },
+                        DiffLine {
+                            content: "    let y = 10;".to_string(),
+                            line_type: LineType::Deletion,
+                            old_line_no: Some(51),
+                            new_line_no: None,
+                            inline_diff: None,
+                        },
+                        DiffLine {
+                            content: "    let y = 20;".to_string(),
+                            line_type: LineType::Addition,
+                            old_line_no: None,
+                            new_line_no: Some(51),
+                            inline_diff: None,
+                        },
+                        DiffLine {
+                            content: "}".to_string(),
+                            line_type: LineType::Context,
+                            old_line_no: Some(52),
+                            new_line_no: Some(52),
+                            inline_diff: None,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        // Render the diff lines with syntax highlighting
+        let lines = renderer.generate_diff_lines(&diff, None, None);
+
+        // Expected structure:
+        // Line 0: Hunk 1 header "@@ -10,3 +10,3 @@"
+        // Lines 1-4: Hunk 1 content (4 lines)
+        // Line 5: Hunk 2 header "@@ -50,3 +50,3 @@"
+        // Lines 6-9: Hunk 2 content (4 lines)
+        assert_eq!(lines.len(), 10);
+
+        // Find the line that says "fn bar() {" in hunk 2
+        // This is line 6 (after hunk 2 header at line 5)
+        let bar_function_line = &lines[6];
+
+        // Get the syntax highlighter to compare expected vs actual highlighting
+        let syntax_highlighter = syntax_highlighter();
+        let syntax = syntax_highlighter
+            .detect_syntax("test.rs")
+            .expect("Should detect Rust syntax");
+
+        // Create a FRESH highlighter to see what the CORRECT highlighting should be
+        // (as if we're highlighting this line in isolation)
+        let mut fresh_highlighter = syntax_highlighter.create_highlighter(syntax);
+        let expected_spans =
+            syntax_highlighter.highlight_line("fn bar() {", syntax, &mut fresh_highlighter);
+
+        // The "fn" keyword should be highlighted with a specific color (not comment color)
+        // Let's find the span containing "fn" in the expected output
+        let expected_fn_span = expected_spans
+            .iter()
+            .find(|(text, _color)| text.contains("fn"))
+            .expect("Should find 'fn' keyword in expected highlighting");
+
+        // Now check what color was actually used in the rendered line
+        // Find the span containing "fn" in the actual rendered line
+        let actual_fn_span = bar_function_line
+            .spans
+            .iter()
+            .find(|span| span.content.contains("fn"))
+            .expect("Should find 'fn' keyword in rendered line");
+
+        // BUG DEMONSTRATION:
+        // With the current implementation, if syntax highlighting is enabled,
+        // the "fn" keyword in hunk 2 will be highlighted with the WRONG color
+        // because the highlighter still thinks it's inside the comment from hunk 1.
+        //
+        // After the fix, these colors should match (both should be the keyword color,
+        // not the comment color).
+
+        println!("Expected 'fn' color: {:?}", expected_fn_span.1);
+        println!("Actual 'fn' color: {:?}", actual_fn_span.style.fg);
+
+        // This assertion will fail with the current buggy implementation
+        // (the colors won't match because of state corruption)
+        assert_eq!(
+            actual_fn_span.style.fg,
+            Some(expected_fn_span.1),
+            "The 'fn' keyword in hunk 2 should be highlighted as a keyword, \
+             not as a comment. State from hunk 1 is leaking into hunk 2!"
         );
     }
 }

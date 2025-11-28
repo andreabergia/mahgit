@@ -492,7 +492,7 @@ impl<'a> StatusView<'a> {
 
         let renderer = DiffRenderer::new(self.config);
         // Create render context once for this diff - handles syntax highlighting automatically
-        let mut render_context = crate::ui::diff_renderer::DiffRenderContext::new(&renderer, diff);
+        let render_context = crate::ui::diff_renderer::DiffRenderContext::new(&renderer, diff);
 
         for (idx, hunk) in diff.hunks.iter().enumerate() {
             // Check if this hunk is collapsed
@@ -529,10 +529,17 @@ impl<'a> StatusView<'a> {
 
             // Only show diff lines if not collapsed
             if !is_collapsed {
+                // Create a fresh highlighter for this hunk to prevent state leakage
+                let mut highlighter = render_context.create_fresh_highlighter();
+
                 // Diff lines with deeper indentation - uses DiffRenderer with automatic syntax highlighting
                 for line in &hunk.lines {
-                    let formatted_line =
-                        render_context.format_diff_line(line, is_selected, Some("      "));
+                    let formatted_line = render_context.format_diff_line(
+                        line,
+                        is_selected,
+                        Some("      "),
+                        highlighter.as_mut(),
+                    );
                     items.push(ListItem::new(formatted_line));
                 }
             }
