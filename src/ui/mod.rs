@@ -12,6 +12,7 @@ use crate::config::Config;
 use crate::diff::DiffGenerator;
 use crate::operations::HunkStager;
 use crate::operations::StagingOperations;
+use crate::operations::commit::CommitPreparation;
 use crate::operations::editor;
 use crate::repository::Repository;
 use crate::status::RepositoryStatus;
@@ -43,6 +44,8 @@ pub struct App {
     active_modal: Option<BoxedModal>,
     /// Modal context for tracking what modal system is active
     modal_context: ModalContext,
+    /// Pending commit preparation (set when opening editor for commit)
+    pending_commit: Option<CommitPreparation>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -75,6 +78,7 @@ impl App {
             config: Arc::new(config),
             active_modal: None,
             modal_context: ModalContext::None,
+            pending_commit: None,
         }
     }
 
@@ -205,17 +209,77 @@ impl App {
                     match editor_result {
                         Ok(success) => {
                             if success {
-                                // Refresh status after editing in case the file was modified
-                                self.refresh_status();
+                                // Check if this was a commit operation
+                                if let Some(preparation) = self.pending_commit.take() {
+                                    use std::path::PathBuf;
+                                    let temp_file = PathBuf::from(&file_path);
+
+                                    // Read the commit message from the file
+                                    match crate::operations::commit::CommitPreparation::read_message_from_file(&temp_file) {
+                                        Ok(message) => {
+                                            // Execute the commit
+                                            use crate::operations::commit::CommitOperations;
+                                            let commit_ops = CommitOperations::new(&self.repository);
+
+                                            match commit_ops.execute_commit(&message, &preparation.flags) {
+                                                Ok(oid) => {
+                                                    self.feedback_manager.show_result(
+                                                        crate::operations::OperationResult::new(format!(
+                                                            "Created commit: {}",
+                                                            oid
+                                                        )),
+                                                    );
+                                                    self.refresh_status_after_operation();
+                                                }
+                                                Err(err) => {
+                                                    self.feedback_manager.show_result(
+                                                        crate::operations::OperationResult::new(format!(
+                                                            "Failed to create commit: {}",
+                                                            err
+                                                        )),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        Err(err) => {
+                                            self.feedback_manager.show_result(
+                                                crate::operations::OperationResult::new(format!(
+                                                    "Failed to read commit message: {}",
+                                                    err
+                                                )),
+                                            );
+                                        }
+                                    }
+
+                                    // Clean up the temp file
+                                    let _ = std::fs::remove_file(&temp_file);
+                                } else {
+                                    // Regular file edit - refresh status
+                                    self.refresh_status();
+                                }
                             } else {
-                                self.feedback_manager.show_result(
-                                    crate::operations::OperationResult::new(
-                                        "Editor exited with error".to_string(),
-                                    ),
-                                );
+                                // Editor exited with error - clean up commit state if any
+                                if self.pending_commit.is_some() {
+                                    self.pending_commit = None;
+                                    self.feedback_manager.show_result(
+                                        crate::operations::OperationResult::new(
+                                            "Commit aborted: editor exited with error".to_string(),
+                                        ),
+                                    );
+                                } else {
+                                    self.feedback_manager.show_result(
+                                        crate::operations::OperationResult::new(
+                                            "Editor exited with error".to_string(),
+                                        ),
+                                    );
+                                }
                             }
                         }
                         Err(err) => {
+                            // Clean up commit state if any
+                            if self.pending_commit.is_some() {
+                                self.pending_commit = None;
+                            }
                             self.feedback_manager.show_result(
                                 crate::operations::OperationResult::new(format!(
                                     "Failed to open editor: {}",
@@ -362,10 +426,10 @@ impl App {
                 // TODO: Implement inline diff navigation
             }
             Command::OpenCommitModal => {
-                // TODO: Show commit modal (Phase 2)
+                self.show_commit_modal();
             }
-            Command::Commit(_mode) => {
-                // TODO: Handle commit operation (Phase 4)
+            Command::Commit(mode) => {
+                self.handle_commit_command(mode);
             }
             Command::Unknown => {
                 // Ignore unknown commands
@@ -1092,6 +1156,73 @@ impl App {
         }
     }
 
+    // Commit operations
+
+    /// Handle a commit command
+    fn handle_commit_command(&mut self, mode: input::CommitMode) {
+        use crate::operations::commit::CommitOperations;
+
+        let commit_ops = CommitOperations::new(&self.repository);
+
+        // Prepare the commit based on the mode
+        let preparation = match commit_ops.prepare_commit(mode) {
+            Ok(prep) => prep,
+            Err(err) => {
+                self.feedback_manager
+                    .show_result(crate::operations::OperationResult::new(format!(
+                        "Failed to prepare commit: {}",
+                        err
+                    )));
+                return;
+            }
+        };
+
+        // For extend mode (no_edit), execute immediately without opening editor
+        if preparation.flags.no_edit {
+            match commit_ops.execute_commit(&preparation.message_template, &preparation.flags) {
+                Ok(oid) => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(format!(
+                            "Extended commit: {}",
+                            oid
+                        )));
+                    self.refresh_status_after_operation();
+                }
+                Err(err) => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(format!(
+                            "Failed to extend commit: {}",
+                            err
+                        )));
+                }
+            }
+            return;
+        }
+
+        // For other modes, open editor with message template
+        match preparation.create_message_file() {
+            Ok(temp_file) => {
+                // Convert PathBuf to String
+                if let Some(file_path_str) = temp_file.to_str() {
+                    self.pending_editor_file = Some(file_path_str.to_string());
+                    self.pending_commit = Some(preparation);
+                } else {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(
+                            "Failed to create commit message file: invalid path".to_string(),
+                        ));
+                }
+            }
+            Err(err) => {
+                self.feedback_manager
+                    .show_result(crate::operations::OperationResult::new(format!(
+                        "Failed to create commit message file: {}",
+                        err
+                    )));
+            }
+        }
+    }
+
     // Modal management methods
 
     /// Show the commit modal
@@ -1119,5 +1250,357 @@ impl App {
             return true;
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::operations::commit::{CommitOperations, CommitPreparation};
+    use std::fs;
+
+    fn create_test_config() -> Config {
+        Config {
+            theme: crate::theme::Theme::default(),
+            tab_width: 4,
+            show_line_numbers: true,
+        }
+    }
+
+    fn create_test_repo(_name: &str) -> (Repository, tempfile::TempDir) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path();
+
+        let git_repo = git2::Repository::init(repo_path).unwrap();
+
+        // Configure user for commits
+        let mut config = git_repo.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+
+        let repository = Repository::from_git2_repo(git_repo);
+
+        (repository, temp_dir)
+    }
+
+    fn create_test_file(repo_dir: &std::path::Path, name: &str, content: &str) {
+        let file_path = repo_dir.join(name);
+        fs::write(&file_path, content).unwrap();
+    }
+
+    #[test]
+    fn test_commit_normal_prepare_and_execute() {
+        let (repo, temp_dir) = create_test_repo("commit_normal");
+        let repo_path = temp_dir.path();
+
+        // Create and stage a file
+        create_test_file(repo_path, "test.txt", "test content");
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+
+        // Prepare normal commit
+        let preparation = commit_ops
+            .prepare_commit(input::CommitMode::Normal)
+            .unwrap();
+        assert_eq!(preparation.mode, input::CommitMode::Normal);
+        assert!(!preparation.flags.amend);
+        assert!(!preparation.flags.no_edit);
+
+        // Create message file and read it back
+        let temp_file = preparation.create_message_file().unwrap();
+        fs::write(&temp_file, "Test commit message\n").unwrap();
+
+        let message = CommitPreparation::read_message_from_file(&temp_file).unwrap();
+        assert_eq!(message, "Test commit message");
+
+        // Execute commit
+        let commit_oid = commit_ops
+            .execute_commit(&message, &preparation.flags)
+            .unwrap();
+
+        // Verify commit was created
+        let git_repo = repo.git2_repo();
+        let commit = git_repo.find_commit(commit_oid).unwrap();
+        assert_eq!(commit.message().unwrap(), "Test commit message");
+
+        // Clean up
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_commit_amend_prepare_and_execute() {
+        let (repo, temp_dir) = create_test_repo("commit_amend");
+        let repo_path = temp_dir.path();
+
+        // Create initial commit
+        create_test_file(repo_path, "test.txt", "initial content");
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+        let initial_oid = commit_ops
+            .execute_commit("Initial commit", &Default::default())
+            .unwrap();
+
+        // Make a change and stage it
+        create_test_file(repo_path, "test.txt", "modified content");
+        repo.add_to_index("test.txt").unwrap();
+
+        // Prepare amend commit
+        let preparation = commit_ops.prepare_commit(input::CommitMode::Amend).unwrap();
+        assert_eq!(preparation.mode, input::CommitMode::Amend);
+        assert!(preparation.flags.amend);
+        assert!(!preparation.flags.no_edit);
+        assert_eq!(preparation.message_template, "Initial commit");
+
+        // Execute amend with modified message
+        let amended_message = "Amended commit message";
+        let amended_oid = commit_ops
+            .execute_commit(amended_message, &preparation.flags)
+            .unwrap();
+
+        // Verify the commit was amended (different OID)
+        assert_ne!(initial_oid, amended_oid);
+
+        // Verify the amended commit has the new message
+        let git_repo = repo.git2_repo();
+        let amended_commit = git_repo.find_commit(amended_oid).unwrap();
+        assert_eq!(amended_commit.message().unwrap(), amended_message);
+
+        // Verify HEAD points to the amended commit
+        let head = git_repo.head().unwrap();
+        let head_commit = head.peel_to_commit().unwrap();
+        assert_eq!(head_commit.id(), amended_oid);
+    }
+
+    #[test]
+    fn test_commit_extend_immediate_execution() {
+        let (repo, temp_dir) = create_test_repo("commit_extend");
+        let repo_path = temp_dir.path();
+
+        // Create initial commit
+        create_test_file(repo_path, "test.txt", "initial content");
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+        let initial_oid = commit_ops
+            .execute_commit("Initial commit", &Default::default())
+            .unwrap();
+
+        // Make a change and stage it
+        create_test_file(repo_path, "test.txt", "extended content");
+        repo.add_to_index("test.txt").unwrap();
+
+        // Prepare extend commit
+        let preparation = commit_ops
+            .prepare_commit(input::CommitMode::Extend)
+            .unwrap();
+        assert_eq!(preparation.mode, input::CommitMode::Extend);
+        assert!(preparation.flags.amend);
+        assert!(preparation.flags.no_edit);
+
+        // Execute extend (should use existing message)
+        let extended_oid = commit_ops
+            .execute_commit(&preparation.message_template, &preparation.flags)
+            .unwrap();
+
+        // Verify the commit was amended with the same message
+        assert_ne!(initial_oid, extended_oid);
+
+        let git_repo = repo.git2_repo();
+        let extended_commit = git_repo.find_commit(extended_oid).unwrap();
+        assert_eq!(extended_commit.message().unwrap(), "Initial commit");
+    }
+
+    #[test]
+    fn test_commit_reword_prepare() {
+        let (repo, temp_dir) = create_test_repo("commit_reword");
+        let repo_path = temp_dir.path();
+
+        // Create initial commit
+        create_test_file(repo_path, "test.txt", "content");
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+        commit_ops
+            .execute_commit("Initial commit", &Default::default())
+            .unwrap();
+
+        // Prepare reword commit (no staged changes needed)
+        let preparation = commit_ops
+            .prepare_commit(input::CommitMode::Reword)
+            .unwrap();
+        assert_eq!(preparation.mode, input::CommitMode::Reword);
+        assert!(preparation.flags.amend);
+        assert!(!preparation.flags.no_edit);
+        assert_eq!(preparation.message_template, "Initial commit");
+    }
+
+    #[test]
+    fn test_commit_with_empty_message_fails() {
+        let (repo, temp_dir) = create_test_repo("commit_empty_message");
+        let repo_path = temp_dir.path();
+
+        // Create and stage a file
+        create_test_file(repo_path, "test.txt", "content");
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+        let preparation = commit_ops
+            .prepare_commit(input::CommitMode::Normal)
+            .unwrap();
+
+        // Create message file with only comments
+        let temp_file = preparation.create_message_file().unwrap();
+        fs::write(&temp_file, "# Only comments\n# More comments\n").unwrap();
+
+        // Reading should fail due to empty message
+        let result = CommitPreparation::read_message_from_file(&temp_file);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("empty commit message")
+        );
+
+        // Clean up
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_commit_message_filtering() {
+        let (repo, temp_dir) = create_test_repo("commit_message_filter");
+        let repo_path = temp_dir.path();
+
+        create_test_file(repo_path, "test.txt", "content");
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+        let preparation = commit_ops
+            .prepare_commit(input::CommitMode::Normal)
+            .unwrap();
+
+        // Create message file with comments and content
+        let temp_file = preparation.create_message_file().unwrap();
+        fs::write(
+            &temp_file,
+            "Actual commit message\n\n# This is a comment\nSecond line\n# Another comment\n",
+        )
+        .unwrap();
+
+        let message = CommitPreparation::read_message_from_file(&temp_file).unwrap();
+        assert_eq!(message, "Actual commit message\n\nSecond line");
+
+        // Clean up
+        fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn test_app_handle_commit_command_normal() {
+        let (repo, temp_dir) = create_test_repo("app_commit_normal");
+        let repo_path = temp_dir.path();
+
+        // Create an initial commit first so RepositoryStatus can work
+        create_test_file(repo_path, "initial.txt", "initial");
+        repo.add_to_index("initial.txt").unwrap();
+        let commit_ops = CommitOperations::new(&repo);
+        commit_ops
+            .execute_commit("Initial commit", &Default::default())
+            .unwrap();
+
+        // Create and stage a file
+        create_test_file(repo_path, "test.txt", "content");
+        repo.add_to_index("test.txt").unwrap();
+
+        // Reload status to see the staged file
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+
+        // Handle commit command
+        app.handle_commit_command(input::CommitMode::Normal);
+
+        // Verify pending_editor_file was set
+        assert!(app.pending_editor_file.is_some());
+
+        // Verify pending_commit was set
+        assert!(app.pending_commit.is_some());
+        let pending = app.pending_commit.as_ref().unwrap();
+        assert_eq!(pending.mode, input::CommitMode::Normal);
+        assert!(!pending.flags.no_edit);
+    }
+
+    #[test]
+    fn test_app_handle_commit_command_extend() {
+        let (repo, temp_dir) = create_test_repo("app_commit_extend");
+        let repo_path = temp_dir.path();
+
+        // Create initial commit
+        create_test_file(repo_path, "test.txt", "initial");
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+        commit_ops
+            .execute_commit("Initial commit", &Default::default())
+            .unwrap();
+
+        // Make and stage a change
+        create_test_file(repo_path, "test.txt", "extended");
+        repo.add_to_index("test.txt").unwrap();
+
+        // Reload status
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+
+        // Handle extend commit command
+        app.handle_commit_command(input::CommitMode::Extend);
+
+        // Verify no editor file was set (extend executes immediately)
+        assert!(app.pending_editor_file.is_none());
+        assert!(app.pending_commit.is_none());
+
+        // Verify commit was created (check feedback message contains "Extended commit")
+        let feedback = app.feedback_manager.get_current_message();
+        assert!(feedback.is_some());
+        assert!(feedback.unwrap().message.contains("Extended commit"));
+    }
+
+    #[test]
+    fn test_commit_without_head_initial_commit() {
+        let (repo, temp_dir) = create_test_repo("initial_commit");
+        let repo_path = temp_dir.path();
+
+        // Create and stage a file (no initial commit yet)
+        create_test_file(repo_path, "test.txt", "content");
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+
+        // Should be able to prepare normal commit even without HEAD
+        let preparation = commit_ops
+            .prepare_commit(input::CommitMode::Normal)
+            .unwrap();
+        assert_eq!(preparation.mode, input::CommitMode::Normal);
+
+        // Execute the initial commit
+        let commit_oid = commit_ops
+            .execute_commit("Initial commit", &preparation.flags)
+            .unwrap();
+
+        // Verify the commit was created
+        let git_repo = repo.git2_repo();
+        let commit = git_repo.find_commit(commit_oid).unwrap();
+        assert_eq!(commit.parent_count(), 0); // Initial commit has no parents
+    }
+
+    #[test]
+    fn test_amend_without_head_fails() {
+        let (repo, _temp_dir) = create_test_repo("amend_no_head");
+
+        let commit_ops = CommitOperations::new(&repo);
+
+        // Attempting to prepare amend without HEAD should fail
+        let result = commit_ops.prepare_commit(input::CommitMode::Amend);
+        assert!(result.is_err());
     }
 }

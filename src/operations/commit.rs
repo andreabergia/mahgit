@@ -230,9 +230,13 @@ impl<'repo> CommitOperations<'repo> {
         // 3. Handle their exit codes
 
         // Create the commit
+        // For amend, we need to create the commit without updating HEAD first,
+        // then manually update HEAD to avoid git2's parent checking
+        let update_ref = if flags.amend { None } else { Some("HEAD") };
+
         let commit_oid = git_repo
             .commit(
-                Some("HEAD"),
+                update_ref,
                 &signature,
                 &signature,
                 message,
@@ -240,6 +244,17 @@ impl<'repo> CommitOperations<'repo> {
                 &parent_refs,
             )
             .map_err(|e| RepositoryError::Other(format!("Failed to create commit: {}", e)))?;
+
+        // If amending, manually update HEAD to point to the new commit
+        if flags.amend {
+            // Get the HEAD reference and update it to point to the new commit
+            let mut head = git_repo
+                .head()
+                .map_err(|e| RepositoryError::Other(format!("Failed to get HEAD: {}", e)))?;
+
+            head.set_target(commit_oid, "commit (amend)")
+                .map_err(|e| RepositoryError::Other(format!("Failed to update HEAD: {}", e)))?;
+        }
 
         Ok(commit_oid)
     }
