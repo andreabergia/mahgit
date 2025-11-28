@@ -584,9 +584,8 @@ mod tests {
     #[test]
     fn test_diff_view_creation() {
         let diff = create_test_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
@@ -597,9 +596,8 @@ mod tests {
     #[test]
     fn test_scrolling() {
         let diff = create_test_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
@@ -623,9 +621,8 @@ mod tests {
     fn test_binary_diff() {
         let mut diff = create_test_diff();
         diff.binary = true;
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
@@ -639,9 +636,8 @@ mod tests {
     #[test]
     fn test_hunk_navigation() {
         let diff = create_test_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
@@ -663,9 +659,8 @@ mod tests {
     #[test]
     fn test_arrow_key_navigation() {
         let diff = create_test_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
@@ -765,9 +760,8 @@ mod tests {
     #[test]
     fn test_multi_hunk_navigation() {
         let diff = create_multi_hunk_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
@@ -798,9 +792,8 @@ mod tests {
     #[test]
     fn test_scroll_updates_active_hunk() {
         let diff = create_multi_hunk_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
@@ -821,7 +814,7 @@ mod tests {
     #[test]
     fn test_hunk_count() {
         let single_hunk_diff = create_test_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let theme = crate::theme::Theme::from_name("github-dark").unwrap();
         let config = Config {
             theme: theme.clone(),
             tab_width: 4,
@@ -848,7 +841,7 @@ mod tests {
     #[test]
     fn test_line_numbers_toggle_and_gutter() {
         let diff = create_test_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let theme = crate::theme::Theme::from_name("github-dark").unwrap();
         let mut config = Config {
             theme: theme.clone(),
             tab_width: 4,
@@ -876,7 +869,7 @@ mod tests {
     #[test]
     fn test_current_hunk_highlight_applies_to_lines() {
         let diff = create_multi_hunk_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
+        let theme = crate::theme::Theme::from_name("github-dark").unwrap();
         let config = Config {
             theme: theme.clone(),
             tab_width: 4,
@@ -908,9 +901,8 @@ mod tests {
     #[test]
     fn test_should_pin_header_when_scrolled_past_header() {
         let diff = create_multi_hunk_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
@@ -949,9 +941,8 @@ mod tests {
     #[test]
     fn test_collect_visible_lines_skips_header_when_pinned() {
         let diff = create_multi_hunk_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
@@ -1004,9 +995,8 @@ mod tests {
     #[test]
     fn test_sticky_header_viewport_height_adjustment() {
         let diff = create_multi_hunk_diff();
-        let theme = crate::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };

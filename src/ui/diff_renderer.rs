@@ -219,7 +219,7 @@ mod tests {
 
     fn test_config() -> Config {
         Config {
-            theme: crate::theme::Theme::from_name("gruvbox-dark").unwrap(),
+            theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         }

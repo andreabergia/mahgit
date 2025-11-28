@@ -15,7 +15,7 @@ struct ConfigFile {
 impl Default for ConfigFile {
     fn default() -> Self {
         Self {
-            theme: "gruvbox-dark".to_string(),
+            theme: "github-dark".to_string(),
             tab_width: 4,
             show_line_numbers: true,
         }
@@ -186,24 +186,22 @@ mod tests {
     #[test]
     fn test_config_file_default() {
         let config_file = ConfigFile::default();
-        assert_eq!(config_file.theme, "gruvbox-dark");
+        assert_eq!(config_file.theme, "github-dark");
         assert_eq!(config_file.tab_width, 4);
         assert!(config_file.show_line_numbers);
     }
 
     #[test]
     fn test_config_expand_tabs() {
-        let theme = Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
         assert_eq!(config.expand_tabs("\thello"), "    hello");
 
-        let theme_8 = Theme::from_name("gruvbox-dark").unwrap();
         let config_width_8 = Config {
-            theme: theme_8,
+            theme: Theme::default(),
             tab_width: 8,
             show_line_numbers: true,
         };

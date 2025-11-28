@@ -35,9 +35,8 @@ fn test_help_window() {
         .expect("Failed to create test repository")
         .repository;
     let status = RepositoryStatus::empty();
-    let theme = mahgit::theme::Theme::from_name("gruvbox-dark").unwrap();
     let config = Config {
-        theme,
+        theme: mahgit::theme::Theme::default(),
         tab_width: 4,
         show_line_numbers: true,
     };
@@ -66,9 +65,8 @@ fn test_help_window_esc_behavior() {
         .expect("Failed to create test repository")
         .repository;
     let status = RepositoryStatus::empty();
-    let theme = mahgit::theme::Theme::from_name("gruvbox-dark").unwrap();
     let config = Config {
-        theme,
+        theme: mahgit::theme::Theme::default(),
         tab_width: 4,
         show_line_numbers: true,
     };

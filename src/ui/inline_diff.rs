@@ -61,7 +61,7 @@ mod tests {
 
     fn test_config() -> Config {
         Config {
-            theme: Theme::from_name("gruvbox-dark").unwrap(),
+            theme: Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         }

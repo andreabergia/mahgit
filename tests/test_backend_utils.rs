@@ -22,9 +22,8 @@ impl TestApp {
         // Make sure to load the status from the repository
         status.reload(&repository)?;
 
-        let theme = mahgit::theme::Theme::from_name("gruvbox-dark").unwrap();
         let config = Config {
-            theme,
+            theme: mahgit::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
         };
