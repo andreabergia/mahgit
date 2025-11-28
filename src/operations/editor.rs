@@ -87,11 +87,10 @@ mod tests {
         // and will fallback to "vi"
         // Note: This test might be flaky in environments where these are set
         // In a real scenario, we'd use dependency injection or mock env vars
-        let temp_dir = std::env::temp_dir().join("mahgit_test_editor");
-        std::fs::create_dir_all(&temp_dir).unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
 
         // Create a temporary git repo for testing
-        let repo = git2::Repository::init(&temp_dir).unwrap();
+        let repo = git2::Repository::init(temp_dir.path()).unwrap();
         let mahgit_repo = Repository::from_git2_repo(repo);
 
         // Clear environment variables for this test
@@ -105,7 +104,6 @@ mod tests {
         // Should fallback to vi if nothing is set
         assert!(editor == "vi" || !editor.is_empty());
 
-        // Cleanup
-        std::fs::remove_dir_all(&temp_dir).ok();
+        // temp_dir automatically cleans up when dropped
     }
 }
