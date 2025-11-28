@@ -7,7 +7,7 @@ pub mod syntax;
 pub use generator::DiffGenerator;
 pub use navigator::HunkNavigator;
 pub use parser::DiffParser;
-pub use syntax::SyntaxHighlighter;
+pub use syntax::{SyntaxHighlighter, syntax_highlighter};
 
 #[derive(Debug, Clone)]
 pub struct Diff {

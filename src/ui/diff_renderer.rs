@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::diff::{Diff, DiffLine, LineType, SyntaxHighlighter};
+use crate::diff::{Diff, DiffLine, LineType, syntax_highlighter};
 use crate::ui::inline_diff::InlineDiffRenderer;
 use ratatui::{
     style::{Modifier, Style},
@@ -15,7 +15,6 @@ pub struct LineNumberWidths {
 
 pub struct DiffRenderer<'a> {
     config: &'a Config,
-    syntax_highlighter: Option<SyntaxHighlighter>,
 }
 
 /// Context for rendering a single diff with syntax highlighting state
@@ -34,21 +33,17 @@ impl<'a, 'b> DiffRenderContext<'a, 'b> {
             None
         };
 
+        let syntax_highlighter = syntax_highlighter();
         let (syntax_ref, highlighter) =
-            if let Some(syntax_highlighter) = &renderer.syntax_highlighter {
-                if let Some(syntax) = syntax_highlighter.detect_syntax(&diff.file_path) {
-                    eprintln!(
-                        "[SYNTAX] Detected {} syntax for file: {}",
-                        syntax.name, diff.file_path
-                    );
-                    let highlighter = syntax_highlighter.create_highlighter(syntax);
-                    (Some(syntax), Some(highlighter))
-                } else {
-                    eprintln!("[SYNTAX] No syntax detected for file: {}", diff.file_path);
-                    (None, None)
-                }
+            if let Some(syntax) = syntax_highlighter.detect_syntax(&diff.file_path) {
+                eprintln!(
+                    "[SYNTAX] Detected {} syntax for file: {}",
+                    syntax.name, diff.file_path
+                );
+                let highlighter = syntax_highlighter.create_highlighter(syntax);
+                (Some(syntax), Some(highlighter))
             } else {
-                eprintln!("[SYNTAX] No syntax highlighter available");
+                eprintln!("[SYNTAX] No syntax detected for file: {}", diff.file_path);
                 (None, None)
             };
 
@@ -85,11 +80,7 @@ impl<'a, 'b> DiffRenderContext<'a, 'b> {
 
 impl<'a> DiffRenderer<'a> {
     pub fn new(config: &'a Config) -> Self {
-        let syntax_highlighter = Some(SyntaxHighlighter::new());
-        Self {
-            config,
-            syntax_highlighter,
-        }
+        Self { config }
     }
 
     /// Calculate the maximum line number widths for formatting
@@ -228,38 +219,31 @@ impl<'a> DiffRenderer<'a> {
 
         let content_spans = if let Some((syntax_ref, highlighter)) = syntax_state {
             // Prefer syntax highlighting over inline diffs when available
-            if let Some(syntax_highlighter) = &self.syntax_highlighter {
-                let highlighted =
-                    syntax_highlighter.highlight_line(&expanded_content, syntax_ref, highlighter);
+            let syntax_highlighter = syntax_highlighter();
+            let highlighted =
+                syntax_highlighter.highlight_line(&expanded_content, syntax_ref, highlighter);
 
-                // Use prefix_style for the line prefix to show diff color (green/red)
-                let mut result = vec![Span::styled(line_prefix.to_string(), prefix_style)];
+            // Use prefix_style for the line prefix to show diff color (green/red)
+            let mut result = vec![Span::styled(line_prefix.to_string(), prefix_style)];
 
-                // Determine background color based on line type
-                let bg_color = match diff_line.line_type {
-                    LineType::Addition => Some(self.config.theme.diff_inline_addition),
-                    LineType::Deletion => Some(self.config.theme.diff_inline_deletion),
-                    LineType::Context => None,
-                    LineType::NoNewlineEOF => None,
-                };
+            // Determine background color based on line type
+            let bg_color = match diff_line.line_type {
+                LineType::Addition => Some(self.config.theme.diff_inline_addition),
+                LineType::Deletion => Some(self.config.theme.diff_inline_deletion),
+                LineType::Context => None,
+                LineType::NoNewlineEOF => None,
+            };
 
-                // Apply syntax colors to foreground AND diff backgrounds to content
-                for (text, syntax_color) in highlighted {
-                    let mut style = Style::default().fg(syntax_color);
-                    if let Some(bg) = bg_color {
-                        style = style.bg(bg);
-                    }
-                    result.push(Span::styled(text, style));
+            // Apply syntax colors to foreground AND diff backgrounds to content
+            for (text, syntax_color) in highlighted {
+                let mut style = Style::default().fg(syntax_color);
+                if let Some(bg) = bg_color {
+                    style = style.bg(bg);
                 }
-
-                result
-            } else {
-                // Fallback if syntax highlighter is not available
-                vec![Span::styled(
-                    format!("{}{}", line_prefix, expanded_content),
-                    content_style,
-                )]
+                result.push(Span::styled(text, style));
             }
+
+            result
         } else if let Some(inline_diff) = &diff_line.inline_diff {
             // Fall back to inline diffs for word-level change highlighting
             let renderer = InlineDiffRenderer::new(self.config);

@@ -1,10 +1,20 @@
 use ratatui::style::Color;
 use std::path::Path;
+use std::sync::OnceLock;
 use syntect::{
     easy::HighlightLines,
     highlighting::{Style, Theme, ThemeSet},
     parsing::{SyntaxReference, SyntaxSet},
 };
+
+/// Global static syntax highlighter instance, initialized lazily on first use.
+/// This avoids loading ~5MB of syntax definitions on every render.
+static SYNTAX_HIGHLIGHTER: OnceLock<SyntaxHighlighter> = OnceLock::new();
+
+/// Get the global syntax highlighter instance, initializing it if needed.
+pub fn syntax_highlighter() -> &'static SyntaxHighlighter {
+    SYNTAX_HIGHLIGHTER.get_or_init(SyntaxHighlighter::new)
+}
 
 /// SyntaxHighlighter provides syntax highlighting for diff content using syntect.
 pub struct SyntaxHighlighter {

@@ -1,5 +1,7 @@
 use mahgit::config::Config;
-use mahgit::diff::{Diff, DiffContext, DiffHunk, DiffLine, HunkHeader, LineRange, LineType};
+use mahgit::diff::{
+    Diff, DiffContext, DiffHunk, DiffLine, HunkHeader, LineRange, LineType, SyntaxHighlighter,
+};
 use mahgit::ui::diff_renderer::DiffRenderer;
 
 /// Helper to create a Rust diff for testing
