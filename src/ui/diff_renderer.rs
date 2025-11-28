@@ -18,15 +18,15 @@ pub struct DiffRenderer<'a> {
 }
 
 /// Context for rendering a single diff with syntax highlighting state
-pub struct DiffRenderContext<'a, 'b> {
-    renderer: &'a DiffRenderer<'b>,
+pub struct DiffRenderContext<'a> {
+    renderer: &'a DiffRenderer<'a>,
     line_number_widths: Option<LineNumberWidths>,
-    syntax_ref: Option<&'a SyntaxReference>,
-    highlighter: Option<HighlightLines<'a>>,
+    syntax_ref: Option<&'static SyntaxReference>,
+    highlighter: Option<HighlightLines<'static>>,
 }
 
-impl<'a, 'b> DiffRenderContext<'a, 'b> {
-    pub fn new(renderer: &'a DiffRenderer<'b>, diff: &Diff) -> Self {
+impl<'a> DiffRenderContext<'a> {
+    pub fn new(renderer: &'a DiffRenderer<'a>, diff: &Diff) -> Self {
         let line_number_widths = if renderer.config.show_line_numbers {
             Some(DiffRenderer::calculate_line_number_widths(diff))
         } else {
