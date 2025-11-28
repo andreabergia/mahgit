@@ -1179,6 +1179,28 @@ impl App {
 
         // For extend mode (no_edit), execute immediately without opening editor
         if preparation.flags.no_edit {
+            // For extend mode, verify there are changes to commit
+            match commit_ops.has_staged_changes() {
+                Ok(false) => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(
+                            "No staged changes to extend commit with".to_string(),
+                        ));
+                    return;
+                }
+                Err(err) => {
+                    self.feedback_manager
+                        .show_result(crate::operations::OperationResult::new(format!(
+                            "Failed to check for staged changes: {}",
+                            err
+                        )));
+                    return;
+                }
+                Ok(true) => {
+                    // Continue with commit execution
+                }
+            }
+
             match commit_ops.execute_commit(&preparation.message_template, &preparation.flags) {
                 Ok(oid) => {
                     self.feedback_manager
@@ -1563,6 +1585,43 @@ mod tests {
         let feedback = app.feedback_manager.get_current_message();
         assert!(feedback.is_some());
         assert!(feedback.unwrap().message.contains("Extended commit"));
+    }
+
+    #[test]
+    fn test_app_handle_commit_command_extend_no_staged_changes() {
+        let (repo, temp_dir) = create_test_repo("app_commit_extend_no_changes");
+        let repo_path = temp_dir.path();
+
+        // Create initial commit
+        create_test_file(repo_path, "test.txt", "initial");
+        repo.add_to_index("test.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+        commit_ops
+            .execute_commit("Initial commit", &Default::default())
+            .unwrap();
+
+        // DO NOT stage any changes - this is the key difference
+        // Reload status
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+
+        // Handle extend commit command
+        app.handle_commit_command(input::CommitMode::Extend);
+
+        // Verify no editor file was set
+        assert!(app.pending_editor_file.is_none());
+        assert!(app.pending_commit.is_none());
+
+        // Verify the operation was rejected with appropriate message
+        let feedback = app.feedback_manager.get_current_message();
+        assert!(feedback.is_some());
+        assert!(
+            feedback
+                .unwrap()
+                .message
+                .contains("No staged changes to extend commit with")
+        );
     }
 
     #[test]
