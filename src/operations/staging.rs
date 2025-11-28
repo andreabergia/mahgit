@@ -172,13 +172,39 @@ impl<'repo> HunkStager<'repo> {
     ) -> Result<Vec<u8>, RepositoryError> {
         let mut patch = Vec::new();
 
+        // Detect if this is a new file (no old lines)
+        let is_new_file = hunk.old_range.count == 0;
+        // Detect if this is an empty file (no content)
+        let is_empty_file = is_new_file && hunk.lines.is_empty();
+
         // Write patch header
         writeln!(patch, "diff --git a/{} b/{}", file_path, file_path)
             .map_err(RepositoryError::IoError)?;
-        writeln!(patch, "index {}..{} 100644", "0".repeat(7), "0".repeat(7))
-            .map_err(RepositoryError::IoError)?;
-        writeln!(patch, "--- a/{}", file_path).map_err(RepositoryError::IoError)?;
+
+        if is_new_file {
+            // For new files, use special format
+            writeln!(patch, "new file mode 100644").map_err(RepositoryError::IoError)?;
+            if is_empty_file {
+                // For empty files, use the git hash of an empty blob
+                writeln!(patch, "index 0000000..e69de29").map_err(RepositoryError::IoError)?;
+            } else {
+                writeln!(patch, "index {}..{}", "0".repeat(7), "0".repeat(7))
+                    .map_err(RepositoryError::IoError)?;
+            }
+            writeln!(patch, "--- /dev/null").map_err(RepositoryError::IoError)?;
+        } else {
+            // For existing files, use standard format
+            writeln!(patch, "index {}..{} 100644", "0".repeat(7), "0".repeat(7))
+                .map_err(RepositoryError::IoError)?;
+            writeln!(patch, "--- a/{}", file_path).map_err(RepositoryError::IoError)?;
+        }
+
         writeln!(patch, "+++ b/{}", file_path).map_err(RepositoryError::IoError)?;
+
+        // For empty files, don't write hunk header or content
+        if is_empty_file {
+            return Ok(patch);
+        }
 
         // Write hunk header
         writeln!(patch, "{}", hunk.header.raw.trim()).map_err(RepositoryError::IoError)?;
@@ -551,6 +577,109 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_new_file_patch_format() {
+        use crate::diff::{DiffHunk, DiffLine, HunkHeader, LineRange, LineType};
+
+        let test_repo = TestRepo::new().expect("Failed to create test repository");
+        let hunk_stager = HunkStager::new(&test_repo.repo);
+
+        // Create a hunk representing a new file (old_range.count == 0)
+        let hunk = DiffHunk {
+            header: HunkHeader {
+                raw: "@@ -0,0 +1,3 @@".to_string(),
+                old_start: 0,
+                old_lines: 0,
+                new_start: 1,
+                new_lines: 3,
+            },
+            lines: vec![
+                DiffLine {
+                    content: "Line 1".to_string(),
+                    line_type: LineType::Addition,
+                    old_line_no: None,
+                    new_line_no: Some(1),
+                    inline_diff: None,
+                },
+                DiffLine {
+                    content: "Line 2".to_string(),
+                    line_type: LineType::Addition,
+                    old_line_no: None,
+                    new_line_no: Some(2),
+                    inline_diff: None,
+                },
+                DiffLine {
+                    content: "Line 3".to_string(),
+                    line_type: LineType::Addition,
+                    old_line_no: None,
+                    new_line_no: Some(3),
+                    inline_diff: None,
+                },
+            ],
+            old_range: LineRange { start: 0, count: 0 },
+            new_range: LineRange { start: 1, count: 3 },
+            stageable: true,
+            context_lines: 3,
+        };
+
+        let patch_content = hunk_stager
+            .generate_stage_patch("newfile.txt", &hunk)
+            .unwrap();
+        let patch_str = String::from_utf8(patch_content).unwrap();
+
+        println!("Generated patch for new file:\n{}", patch_str);
+
+        // Verify new file patch format
+        assert!(patch_str.contains("diff --git a/newfile.txt b/newfile.txt"));
+        assert!(patch_str.contains("new file mode 100644"));
+        assert!(patch_str.contains("--- /dev/null"));
+        assert!(patch_str.contains("+++ b/newfile.txt"));
+        assert!(patch_str.contains("@@ -0,0 +1,3 @@"));
+        assert!(patch_str.contains("+Line 1"));
+        assert!(patch_str.contains("+Line 2"));
+        assert!(patch_str.contains("+Line 3"));
+    }
+
+    #[test]
+    fn test_empty_file_patch_format() {
+        use crate::diff::{DiffHunk, HunkHeader, LineRange};
+
+        let test_repo = TestRepo::new().expect("Failed to create test repository");
+        let hunk_stager = HunkStager::new(&test_repo.repo);
+
+        // Create a hunk representing an empty new file
+        let hunk = DiffHunk {
+            header: HunkHeader {
+                raw: "@@ -0,0 +1,0 @@".to_string(),
+                old_start: 0,
+                old_lines: 0,
+                new_start: 1,
+                new_lines: 0,
+            },
+            lines: vec![], // Empty file has no lines
+            old_range: LineRange { start: 0, count: 0 },
+            new_range: LineRange { start: 1, count: 0 },
+            stageable: true,
+            context_lines: 3,
+        };
+
+        let patch_content = hunk_stager
+            .generate_stage_patch("empty.txt", &hunk)
+            .unwrap();
+        let patch_str = String::from_utf8(patch_content).unwrap();
+
+        println!("Generated patch for empty file:\n{}", patch_str);
+
+        // Verify empty file patch format (no hunk header)
+        assert!(patch_str.contains("diff --git a/empty.txt b/empty.txt"));
+        assert!(patch_str.contains("new file mode 100644"));
+        assert!(patch_str.contains("index 0000000..e69de29"));
+        assert!(patch_str.contains("--- /dev/null"));
+        assert!(patch_str.contains("+++ b/empty.txt"));
+        // Should NOT contain hunk header for empty files
+        assert!(!patch_str.contains("@@"));
     }
 
     #[test]
