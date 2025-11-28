@@ -229,41 +229,31 @@ fn test_quit_functionality() {
 #[test]
 fn test_console_mode() {
     let test_repo = create_test_repository().expect("Failed to create test repository");
+    let repo_path = test_repo.temp_dir.path();
 
-    let original_dir = env::current_dir().unwrap();
+    // Test console mode (non-interactive)
+    let mahgit_path = get_mahgit_binary_path();
+    let output = Command::new(&mahgit_path)
+        .arg("--console")
+        .current_dir(repo_path) // Explicitly set working directory for subprocess
+        .output()
+        .expect("Failed to run mahgit in console mode");
 
-    // Use a closure to ensure cleanup even if test fails
-    let test_result = std::panic::catch_unwind(|| {
-        env::set_current_dir(test_repo.temp_dir.path()).expect("Failed to change directory");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
 
-        // Test console mode (non-interactive)
-        let mahgit_path = get_mahgit_binary_path();
-        let output = Command::new(&mahgit_path)
-            .arg("--console")
-            .output()
-            .expect("Failed to run mahgit in console mode");
-
-        (
-            output.status.success(),
-            String::from_utf8_lossy(&output.stdout).to_string(),
-        )
-    });
-
-    // Always try to restore directory, but don't fail the test if restoration fails
-    if original_dir.exists() {
-        let _ = env::set_current_dir(&original_dir);
-    }
-
-    // Handle the test result
-    match test_result {
-        Ok((success, stdout)) => {
-            assert!(success, "Console mode should succeed");
-            assert!(stdout.contains("main"), "Should show branch name");
-        }
-        Err(e) => {
-            std::panic::resume_unwind(e);
-        }
-    }
+    assert!(
+        output.status.success(),
+        "Console mode should succeed.\nStdout: {}\nStderr: {}",
+        stdout,
+        stderr
+    );
+    assert!(
+        stdout.contains("main"),
+        "Should show branch name.\nStdout: {}\nStderr: {}",
+        stdout,
+        stderr
+    );
 
     // Keep test_repo in scope until the end to prevent temp directory cleanup
     drop(test_repo);
@@ -275,19 +265,15 @@ fn test_error_handling_outside_repo() {
     // Test starting mahgit outside a git repository
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
 
-    let original_dir = env::current_dir().unwrap();
-    env::set_current_dir(temp_dir.path()).expect("Failed to change directory");
-
     let mahgit_path = get_mahgit_binary_path();
     let output = Command::new(&mahgit_path)
         .arg("--console")
+        .current_dir(temp_dir.path()) // Explicitly set working directory for subprocess
         .output()
         .expect("Failed to run mahgit");
 
     // Should fail with appropriate exit code
     assert!(!output.status.success(), "Should fail outside git repo");
-
-    env::set_current_dir(original_dir).expect("Failed to restore directory");
 }
 
 /// Test error handling for binary files
