@@ -104,8 +104,23 @@ impl App {
     }
 
     pub fn process_key_event(&mut self, key_event: crossterm::event::KeyEvent) {
-        let command = self.input_handler.handle_key(key_event);
-        self.handle_command(command);
+        use crate::ui::input::InputResult;
+
+        let result = self.input_handler.handle_key(key_event);
+        match result {
+            InputResult::Command(command) => self.handle_command(command),
+            InputResult::ShowModal(prefix) => {
+                // TODO: Show modal for the given prefix
+                // This will be implemented in Phase 3
+                let _ = prefix;
+            }
+            InputResult::Pending => {
+                // Waiting for second key, do nothing
+            }
+            InputResult::None => {
+                // No action needed
+            }
+        }
     }
 
     pub fn process_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
@@ -188,11 +203,35 @@ impl App {
 
             terminal.draw(|f| self.render(f))?;
 
+            // Check if we should show a modal (timeout reached for prefix key)
+            if let Some(prefix) = self.input_handler.should_show_modal() {
+                // TODO: Show modal for the given prefix
+                // This will be implemented in Phase 3
+                // For now, just clear the pending state
+                let _ = prefix;
+                self.input_handler.clear_prefix_state();
+            }
+
             if event::poll(std::time::Duration::from_millis(16))? {
                 match event::read()? {
                     Event::Key(key) => {
-                        let command = self.input_handler.handle_key(key);
-                        self.handle_command(command);
+                        use crate::ui::input::InputResult;
+
+                        let result = self.input_handler.handle_key(key);
+                        match result {
+                            InputResult::Command(command) => self.handle_command(command),
+                            InputResult::ShowModal(prefix) => {
+                                // TODO: Show modal for the given prefix
+                                // This will be implemented in Phase 3
+                                let _ = prefix;
+                            }
+                            InputResult::Pending => {
+                                // Waiting for second key, do nothing
+                            }
+                            InputResult::None => {
+                                // No action needed
+                            }
+                        }
                     }
                     Event::Mouse(mouse) => {
                         let command = self.input_handler.handle_mouse(mouse);

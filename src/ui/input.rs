@@ -1,6 +1,19 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use std::time::{Duration, Instant};
 
+/// Result of handling an input event
+#[derive(Debug, Clone, PartialEq)]
+pub enum InputResult {
+    /// Execute a command immediately
+    Command(Command),
+    /// Show a modal for the given prefix key
+    ShowModal(char),
+    /// Waiting for second key in sequence
+    Pending,
+    /// No action needed
+    None,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     // Navigation commands
@@ -88,14 +101,38 @@ struct PreviousKey {
 
 pub struct InputHandler {
     previous_key: Option<PreviousKey>,
+    /// Timeout for displaying modal (300ms)
+    modal_timeout: Duration,
+    /// Timeout for two-key sequences (1000ms)
+    sequence_timeout: Duration,
 }
 
 impl InputHandler {
     pub fn new() -> Self {
-        Self { previous_key: None }
+        Self {
+            previous_key: None,
+            modal_timeout: Duration::from_millis(300),
+            sequence_timeout: Duration::from_millis(1000),
+        }
     }
 
-    pub fn handle_key(&mut self, key_event: KeyEvent) -> Command {
+    /// Check if we should show a modal based on timeout
+    pub fn should_show_modal(&self) -> Option<char> {
+        if let Some(prev) = &self.previous_key {
+            let elapsed = Instant::now().duration_since(prev.timestamp);
+            if elapsed >= self.modal_timeout && Self::is_modal_prefix_key(prev.character) {
+                return Some(prev.character);
+            }
+        }
+        None
+    }
+
+    /// Check if a character is a modal prefix key
+    fn is_modal_prefix_key(c: char) -> bool {
+        matches!(c, 'c')
+    }
+
+    pub fn handle_key(&mut self, key_event: KeyEvent) -> InputResult {
         match key_event {
             // Arrow keys and special keys
             KeyEvent {
@@ -103,14 +140,14 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::ScrollDiffDown
+                InputResult::Command(Command::ScrollDiffDown)
             }
 
             KeyEvent {
                 code: KeyCode::Up, ..
             } => {
                 self.clear_sequence_state();
-                Command::ScrollDiffUp
+                InputResult::Command(Command::ScrollDiffUp)
             }
 
             KeyEvent {
@@ -118,7 +155,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::MoveUpHierarchy
+                InputResult::Command(Command::MoveUpHierarchy)
             }
 
             KeyEvent {
@@ -126,7 +163,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::MoveDownHierarchy
+                InputResult::Command(Command::MoveDownHierarchy)
             }
 
             KeyEvent {
@@ -134,21 +171,21 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::MoveToTop
+                InputResult::Command(Command::MoveToTop)
             }
 
             KeyEvent {
                 code: KeyCode::End, ..
             } => {
                 self.clear_sequence_state();
-                Command::MoveToBottom
+                InputResult::Command(Command::MoveToBottom)
             }
 
             KeyEvent {
                 code: KeyCode::Tab, ..
             } => {
                 self.clear_sequence_state();
-                Command::ToggleAccordion
+                InputResult::Command(Command::ToggleAccordion)
             }
 
             KeyEvent {
@@ -156,7 +193,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::OpenInEditor
+                InputResult::Command(Command::OpenInEditor)
             }
 
             KeyEvent {
@@ -164,7 +201,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::PageDiffDown
+                InputResult::Command(Command::PageDiffDown)
             }
 
             KeyEvent {
@@ -172,14 +209,14 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::PageDiffUp
+                InputResult::Command(Command::PageDiffUp)
             }
 
             KeyEvent {
                 code: KeyCode::Esc, ..
             } => {
                 self.clear_sequence_state();
-                Command::CloseHelp
+                InputResult::Command(Command::CloseHelp)
             }
 
             // Control sequences
@@ -189,7 +226,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::ForceQuit
+                InputResult::Command(Command::ForceQuit)
             }
 
             // Shift+char sequences
@@ -199,7 +236,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::MoveToBottom
+                InputResult::Command(Command::MoveToBottom)
             }
             // Handle space key
             KeyEvent {
@@ -208,7 +245,7 @@ impl InputHandler {
                 ..
             } => {
                 self.clear_sequence_state();
-                Command::PageForward
+                InputResult::Command(Command::PageForward)
             }
 
             // Handle all regular characters
@@ -218,8 +255,9 @@ impl InputHandler {
                 ..
             } => {
                 // Check if this forms a two-key sequence
-                if let Some(command) = self.handle_two_key_sequence(c) {
-                    return command;
+                let result = self.handle_two_key_sequence(c);
+                if !matches!(result, InputResult::None) {
+                    return result;
                 }
 
                 // If it's not a sequence, check for single-key commands
@@ -244,15 +282,16 @@ impl InputHandler {
                 // Only clear sequence state if we found a single-key command
                 if !matches!(command, Command::Unknown) {
                     self.clear_sequence_state();
+                    InputResult::Command(command)
+                } else {
+                    InputResult::Command(command)
                 }
-
-                command
             }
 
             // Default case
             _ => {
                 self.clear_sequence_state();
-                Command::Unknown
+                InputResult::Command(Command::Unknown)
             }
         }
     }
@@ -265,32 +304,70 @@ impl InputHandler {
         }
     }
 
-    fn clear_sequence_state(&mut self) {
+    /// Clear any pending prefix key state
+    pub fn clear_prefix_state(&mut self) {
         self.previous_key = None;
     }
 
-    fn handle_two_key_sequence(&mut self, current_char: char) -> Option<Command> {
+    fn clear_sequence_state(&mut self) {
+        self.clear_prefix_state();
+    }
+
+    fn handle_two_key_sequence(&mut self, current_char: char) -> InputResult {
         let now = Instant::now();
-        let sequence_timeout = Duration::from_millis(1000);
 
-        if let Some(prev) = &self.previous_key
-            && now.duration_since(prev.timestamp) <= sequence_timeout
-        {
-            let sequence = format!("{}{}", prev.character, current_char);
+        if let Some(prev) = &self.previous_key {
+            let elapsed = now.duration_since(prev.timestamp);
+            let prev_char = prev.character;
+
+            // Check if we're within the fast-typing window (before modal timeout)
+            if elapsed < self.modal_timeout {
+                // Fast-typing path: execute command immediately
+                let sequence = format!("{}{}", prev_char, current_char);
+                self.clear_sequence_state();
+
+                return match sequence.as_str() {
+                    "gg" => InputResult::Command(Command::MoveToTop),
+                    "cc" => InputResult::Command(Command::Commit(CommitMode::Normal)),
+                    "ca" => InputResult::Command(Command::Commit(CommitMode::Amend)),
+                    "ce" => InputResult::Command(Command::Commit(CommitMode::Extend)),
+                    "cw" => InputResult::Command(Command::Commit(CommitMode::Reword)),
+                    "cn" => InputResult::Command(Command::Commit(CommitMode::NoVerify)),
+                    _ => InputResult::None,
+                };
+            } else if elapsed < self.sequence_timeout {
+                // We're past modal timeout but still within sequence timeout
+                // If this was a modal prefix key, the modal should already be showing
+                // Handle the second key as a modal selection
+                if Self::is_modal_prefix_key(prev_char) {
+                    self.clear_sequence_state();
+                    // Return the command based on the modal selection
+                    return match (prev_char, current_char) {
+                        ('c', 'c') => InputResult::Command(Command::Commit(CommitMode::Normal)),
+                        ('c', 'a') => InputResult::Command(Command::Commit(CommitMode::Amend)),
+                        ('c', 'e') => InputResult::Command(Command::Commit(CommitMode::Extend)),
+                        ('c', 'w') => InputResult::Command(Command::Commit(CommitMode::Reword)),
+                        ('c', 'n') => InputResult::Command(Command::Commit(CommitMode::NoVerify)),
+                        _ => InputResult::None,
+                    };
+                }
+            }
+            // Timeout exceeded - clear state and treat as new key
             self.clear_sequence_state();
-
-            return match sequence.as_str() {
-                "gg" => Some(Command::MoveToTop),
-                _ => None,
-            };
         }
 
-        // Store this key as the potential first key of a sequence
-        self.previous_key = Some(PreviousKey {
-            character: current_char,
-            timestamp: now,
-        });
-        None
+        // Check if this character is a prefix key for a sequence
+        if matches!(current_char, 'g' | 'c') {
+            // Store this key as the potential first key of a sequence
+            self.previous_key = Some(PreviousKey {
+                character: current_char,
+                timestamp: now,
+            });
+            // Return Pending to indicate we're waiting for a second key
+            return InputResult::Pending;
+        }
+
+        InputResult::None
     }
 
     pub fn get_help_text() -> Vec<&'static str> {
@@ -352,7 +429,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(down_j), Command::ScrollDiffDown);
+        assert_eq!(
+            handler.handle_key(down_j),
+            InputResult::Command(Command::ScrollDiffDown)
+        );
 
         let up_k = KeyEvent {
             code: KeyCode::Char('k'),
@@ -360,7 +440,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(up_k), Command::ScrollDiffUp);
+        assert_eq!(
+            handler.handle_key(up_k),
+            InputResult::Command(Command::ScrollDiffUp)
+        );
     }
 
     #[test]
@@ -373,7 +456,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(quit), Command::Quit);
+        assert_eq!(
+            handler.handle_key(quit),
+            InputResult::Command(Command::Quit)
+        );
 
         let force_quit = KeyEvent {
             code: KeyCode::Char('c'),
@@ -381,7 +467,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(force_quit), Command::ForceQuit);
+        assert_eq!(
+            handler.handle_key(force_quit),
+            InputResult::Command(Command::ForceQuit)
+        );
     }
 
     #[test]
@@ -395,11 +484,14 @@ mod tests {
             state: crossterm::event::KeyEventState::NONE,
         };
 
-        // First 'g' should return Unknown (waiting for second 'g')
-        assert_eq!(handler.handle_key(g_key), Command::Unknown);
+        // First 'g' should return Pending (waiting for second 'g')
+        assert_eq!(handler.handle_key(g_key), InputResult::Pending);
 
         // Second 'g' should return MoveToTop
-        assert_eq!(handler.handle_key(g_key), Command::MoveToTop);
+        assert_eq!(
+            handler.handle_key(g_key),
+            InputResult::Command(Command::MoveToTop)
+        );
     }
 
     #[test]
@@ -414,13 +506,13 @@ mod tests {
         };
 
         // First 'g'
-        assert_eq!(handler.handle_key(g_key), Command::Unknown);
+        assert_eq!(handler.handle_key(g_key), InputResult::Pending);
 
         // Simulate timeout by manually clearing state (represents passage of time)
         handler.clear_sequence_state();
 
         // Second 'g' after timeout should be treated as first 'g' again
-        assert_eq!(handler.handle_key(g_key), Command::Unknown);
+        assert_eq!(handler.handle_key(g_key), InputResult::Pending);
     }
 
     #[test]
@@ -434,7 +526,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(j_key), Command::ScrollDiffDown);
+        assert_eq!(
+            handler.handle_key(j_key),
+            InputResult::Command(Command::ScrollDiffDown)
+        );
 
         // Test that unknown sequences return Unknown for both keys
         let x_key = KeyEvent {
@@ -452,9 +547,15 @@ mod tests {
         };
 
         // First key of unknown sequence
-        assert_eq!(handler.handle_key(x_key), Command::Unknown);
+        assert_eq!(
+            handler.handle_key(x_key),
+            InputResult::Command(Command::Unknown)
+        );
         // Second key of unknown sequence
-        assert_eq!(handler.handle_key(y_key), Command::Unknown);
+        assert_eq!(
+            handler.handle_key(y_key),
+            InputResult::Command(Command::Unknown)
+        );
     }
 
     #[test]
@@ -467,7 +568,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(stage_key), Command::StageFile);
+        assert_eq!(
+            handler.handle_key(stage_key),
+            InputResult::Command(Command::StageFile)
+        );
 
         let unstage_key = KeyEvent {
             code: KeyCode::Char('u'),
@@ -475,7 +579,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(unstage_key), Command::UnstageFile);
+        assert_eq!(
+            handler.handle_key(unstage_key),
+            InputResult::Command(Command::UnstageFile)
+        );
 
         let add_key = KeyEvent {
             code: KeyCode::Char('a'),
@@ -483,7 +590,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(add_key), Command::AddUntracked);
+        assert_eq!(
+            handler.handle_key(add_key),
+            InputResult::Command(Command::AddUntracked)
+        );
 
         let space_key = KeyEvent {
             code: KeyCode::Char(' '),
@@ -491,7 +601,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(space_key), Command::PageForward);
+        assert_eq!(
+            handler.handle_key(space_key),
+            InputResult::Command(Command::PageForward)
+        );
     }
 
     #[test]
@@ -509,8 +622,14 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(shift_s), Command::Unknown);
-        assert_eq!(handler.handle_key(shift_u), Command::Unknown);
+        assert_eq!(
+            handler.handle_key(shift_s),
+            InputResult::Command(Command::Unknown)
+        );
+        assert_eq!(
+            handler.handle_key(shift_u),
+            InputResult::Command(Command::Unknown)
+        );
     }
 
     #[test]
@@ -523,7 +642,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(help_key), Command::ShowHelp);
+        assert_eq!(
+            handler.handle_key(help_key),
+            InputResult::Command(Command::ShowHelp)
+        );
     }
 
     #[test]
@@ -545,7 +667,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(left_arrow), Command::MoveUpHierarchy);
+        assert_eq!(
+            handler.handle_key(left_arrow),
+            InputResult::Command(Command::MoveUpHierarchy)
+        );
 
         let right_arrow = KeyEvent {
             code: KeyCode::Right,
@@ -553,7 +678,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(right_arrow), Command::MoveDownHierarchy);
+        assert_eq!(
+            handler.handle_key(right_arrow),
+            InputResult::Command(Command::MoveDownHierarchy)
+        );
     }
 
     #[test]
@@ -566,7 +694,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(n_key), Command::JumpToNextHunk);
+        assert_eq!(
+            handler.handle_key(n_key),
+            InputResult::Command(Command::JumpToNextHunk)
+        );
 
         let p_key = KeyEvent {
             code: KeyCode::Char('p'),
@@ -574,7 +705,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(p_key), Command::JumpToPreviousHunk);
+        assert_eq!(
+            handler.handle_key(p_key),
+            InputResult::Command(Command::JumpToPreviousHunk)
+        );
     }
 
     #[test]
@@ -618,7 +752,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(down_arrow), Command::ScrollDiffDown);
+        assert_eq!(
+            handler.handle_key(down_arrow),
+            InputResult::Command(Command::ScrollDiffDown)
+        );
 
         let up_arrow = KeyEvent {
             code: KeyCode::Up,
@@ -626,7 +763,10 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         };
-        assert_eq!(handler.handle_key(up_arrow), Command::ScrollDiffUp);
+        assert_eq!(
+            handler.handle_key(up_arrow),
+            InputResult::Command(Command::ScrollDiffUp)
+        );
     }
 
     #[test]
