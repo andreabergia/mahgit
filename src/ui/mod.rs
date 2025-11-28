@@ -312,42 +312,7 @@ impl App {
             if event::poll(poll_timeout)? {
                 match event::read()? {
                     Event::Key(key) => {
-                        use crossterm::event::{KeyCode, KeyModifiers};
-
-                        // If modal is active, route keys to modal first
-                        if self.modal_context != ModalContext::None {
-                            match key.code {
-                                KeyCode::Esc => self.close_modal(),
-                                KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
-                                    // Try to handle the key in the modal
-                                    if !self.handle_modal_input(c) {
-                                        // Key not recognized by modal, ignore it
-                                    }
-                                }
-                                _ => {} // Ignore other keys in modal mode
-                            }
-                            continue;
-                        }
-
-                        // Normal input handling (no modal active)
-                        use crate::ui::input::InputResult;
-
-                        let result = self.input_handler.handle_key(key);
-                        match result {
-                            InputResult::Command(command) => self.handle_command(command),
-                            InputResult::ShowModal(prefix) => {
-                                // Future: support other modals (branch, push, pull, log, etc.)
-                                if prefix == 'c' {
-                                    self.show_commit_modal();
-                                }
-                            }
-                            InputResult::Pending => {
-                                // Waiting for second key, do nothing
-                            }
-                            InputResult::None => {
-                                // No action needed
-                            }
-                        }
+                        self.process_key_event(key);
                     }
                     Event::Mouse(mouse) => {
                         // Ignore mouse events when modal is active
