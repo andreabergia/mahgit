@@ -311,7 +311,7 @@ impl<'repo> CommitOperations<'repo> {
 
 pub struct CommitPreparation {
     pub mode: CommitMode,
-    pub message_template: String,
+    pub initial_message: Option<String>, // For amend/reword: existing HEAD message
     pub flags: CommitFlags,
 }
 ```
@@ -320,17 +320,17 @@ pub struct CommitPreparation {
 
 **Reuse Existing Mechanism**
 - Use `App::pending_editor_file` field
-- Create temp file with commit message template
+- Create temp file with initial commit message (if any)
 - Set `pending_editor_file = Some(temp_path)`
 - Existing event loop already handles editor spawning
 - Read message back after editor closes
 - Execute commit with message
 
-**Commit Message Templates**
-- Normal: Empty or from git config
-- Amend: Load HEAD commit message
-- Extend: No message needed (--no-edit)
-- Reword: Load HEAD message (but only change message)
+**Commit Message Handling**
+- Normal: Start with empty message
+- Amend: Pre-populate with HEAD commit message
+- Extend: Skip editor entirely (--no-edit)
+- Reword: Pre-populate with HEAD commit message
 
 ## Implementation Order
 
