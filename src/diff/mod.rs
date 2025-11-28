@@ -2,10 +2,12 @@ pub mod generator;
 pub mod inline;
 pub mod navigator;
 pub mod parser;
+pub mod syntax;
 
 pub use generator::DiffGenerator;
 pub use navigator::HunkNavigator;
 pub use parser::DiffParser;
+pub use syntax::SyntaxHighlighter;
 
 #[derive(Debug, Clone)]
 pub struct Diff {

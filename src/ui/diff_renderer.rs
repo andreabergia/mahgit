@@ -1,10 +1,11 @@
 use crate::config::Config;
-use crate::diff::{Diff, DiffLine, LineType};
+use crate::diff::{Diff, DiffLine, LineType, SyntaxHighlighter};
 use crate::ui::inline_diff::InlineDiffRenderer;
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
 };
+use syntect::{easy::HighlightLines, parsing::SyntaxReference};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LineNumberWidths {
@@ -14,11 +15,75 @@ pub struct LineNumberWidths {
 
 pub struct DiffRenderer<'a> {
     config: &'a Config,
+    syntax_highlighter: Option<SyntaxHighlighter>,
+}
+
+/// Context for rendering a single diff with syntax highlighting state
+pub struct DiffRenderContext<'a, 'b> {
+    renderer: &'a DiffRenderer<'b>,
+    line_number_widths: Option<LineNumberWidths>,
+    syntax_ref: Option<&'a SyntaxReference>,
+    highlighter: Option<HighlightLines<'a>>,
+}
+
+impl<'a, 'b> DiffRenderContext<'a, 'b> {
+    pub fn new(renderer: &'a DiffRenderer<'b>, diff: &Diff) -> Self {
+        let line_number_widths = if renderer.config.show_line_numbers {
+            Some(DiffRenderer::calculate_line_number_widths(diff))
+        } else {
+            None
+        };
+
+        let (syntax_ref, highlighter) =
+            if let Some(syntax_highlighter) = &renderer.syntax_highlighter {
+                if let Some(syntax) = syntax_highlighter.detect_syntax(&diff.file_path) {
+                    let highlighter = syntax_highlighter.create_highlighter(syntax);
+                    (Some(syntax), Some(highlighter))
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+
+        Self {
+            renderer,
+            line_number_widths,
+            syntax_ref,
+            highlighter,
+        }
+    }
+
+    pub fn format_diff_line(
+        &mut self,
+        diff_line: &DiffLine,
+        is_active_hunk: bool,
+        prefix: Option<&str>,
+    ) -> Line<'static> {
+        let syntax_state =
+            if let (Some(syntax), Some(hl)) = (self.syntax_ref, &mut self.highlighter) {
+                Some((syntax, hl))
+            } else {
+                None
+            };
+
+        self.renderer.format_diff_line(
+            diff_line,
+            self.line_number_widths.as_ref(),
+            is_active_hunk,
+            prefix,
+            syntax_state,
+        )
+    }
 }
 
 impl<'a> DiffRenderer<'a> {
     pub fn new(config: &'a Config) -> Self {
-        Self { config }
+        let syntax_highlighter = Some(SyntaxHighlighter::new());
+        Self {
+            config,
+            syntax_highlighter,
+        }
     }
 
     /// Calculate the maximum line number widths for formatting
@@ -66,6 +131,7 @@ impl<'a> DiffRenderer<'a> {
         line_number_widths: Option<&LineNumberWidths>,
         is_active_hunk: bool,
         prefix: Option<&str>,
+        syntax_state: Option<(&SyntaxReference, &mut HighlightLines)>,
     ) -> Line<'static> {
         let (line_prefix, color) = match diff_line.line_type {
             LineType::Addition => ("+", self.config.theme.staged),
@@ -138,9 +204,42 @@ impl<'a> DiffRenderer<'a> {
         ));
 
         let content_spans = if let Some(inline_diff) = &diff_line.inline_diff {
+            // For lines with inline diffs, skip syntax highlighting
+            // to keep the word-level change highlighting clear
             let renderer = InlineDiffRenderer::new(self.config);
             renderer.inline_content_spans(inline_diff, content_style, line_prefix)
+        } else if let Some((syntax_ref, highlighter)) = syntax_state {
+            // Apply syntax highlighting if available
+            if let Some(syntax_highlighter) = &self.syntax_highlighter {
+                let highlighted =
+                    syntax_highlighter.highlight_line(&expanded_content, syntax_ref, highlighter);
+
+                let mut result = vec![Span::styled(line_prefix.to_string(), content_style)];
+
+                for (text, syntax_color) in highlighted {
+                    // Apply syntax color as foreground, starting from a clean style
+                    let mut span_style = Style::default().fg(syntax_color);
+                    // Preserve any modifiers (like DIM) from content_style
+                    if content_style.add_modifier.contains(Modifier::DIM) {
+                        span_style = span_style.add_modifier(Modifier::DIM);
+                    }
+                    // Preserve background color from content_style (for hunk highlighting)
+                    if let Some(bg) = content_style.bg {
+                        span_style = span_style.bg(bg);
+                    }
+                    result.push(Span::styled(text, span_style));
+                }
+
+                result
+            } else {
+                // Fallback if syntax highlighter is not available
+                vec![Span::styled(
+                    format!("{}{}", line_prefix, expanded_content),
+                    content_style,
+                )]
+            }
         } else {
+            // No syntax highlighting or inline diff
             vec![Span::styled(
                 format!("{}{}", line_prefix, expanded_content),
                 content_style,
@@ -159,12 +258,8 @@ impl<'a> DiffRenderer<'a> {
         active_hunk_index: Option<usize>,
         prefix: Option<&str>,
     ) -> Vec<Line<'static>> {
+        let mut context = DiffRenderContext::new(self, diff);
         let mut lines = Vec::new();
-        let line_number_widths = if self.config.show_line_numbers {
-            Some(Self::calculate_line_number_widths(diff))
-        } else {
-            None
-        };
 
         for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
             // Determine if this is the current hunk
@@ -186,12 +281,7 @@ impl<'a> DiffRenderer<'a> {
 
             // Add diff lines
             for diff_line in &hunk.lines {
-                let line = self.format_diff_line(
-                    diff_line,
-                    line_number_widths.as_ref(),
-                    is_current_hunk,
-                    prefix,
-                );
+                let line = context.format_diff_line(diff_line, is_current_hunk, prefix);
                 lines.push(line);
             }
         }
@@ -294,7 +384,8 @@ mod tests {
         let diff = create_test_diff();
         let widths = DiffRenderer::calculate_line_number_widths(&diff);
 
-        let line = renderer.format_diff_line(&diff.hunks[0].lines[0], Some(&widths), false, None);
+        let line =
+            renderer.format_diff_line(&diff.hunks[0].lines[0], Some(&widths), false, None, None);
 
         // Should have: old_line, space, new_line, space, gutter, space, content
         assert!(line.spans.len() >= 7);
@@ -310,7 +401,7 @@ mod tests {
         let renderer = DiffRenderer::new(&config);
         let diff = create_test_diff();
 
-        let line = renderer.format_diff_line(&diff.hunks[0].lines[0], None, false, None);
+        let line = renderer.format_diff_line(&diff.hunks[0].lines[0], None, false, None, None);
 
         // Should have: gutter, space, content (no line numbers)
         assert_eq!(line.spans.len(), 3);
@@ -323,7 +414,8 @@ mod tests {
         let renderer = DiffRenderer::new(&config);
         let diff = create_test_diff();
 
-        let line = renderer.format_diff_line(&diff.hunks[0].lines[0], None, false, Some("    "));
+        let line =
+            renderer.format_diff_line(&diff.hunks[0].lines[0], None, false, Some("    "), None);
 
         // First span should be the prefix
         assert_eq!(line.spans[0].content, "    ");
@@ -354,12 +446,12 @@ mod tests {
 
         // Without highlighting
         let line_no_highlight =
-            renderer.format_diff_line(&diff.hunks[0].lines[0], Some(&widths), false, None);
+            renderer.format_diff_line(&diff.hunks[0].lines[0], Some(&widths), false, None, None);
         assert_eq!(line_no_highlight.spans[0].style.bg, None);
 
         // With highlighting
         let line_with_highlight =
-            renderer.format_diff_line(&diff.hunks[0].lines[0], Some(&widths), true, None);
+            renderer.format_diff_line(&diff.hunks[0].lines[0], Some(&widths), true, None, None);
         assert_eq!(
             line_with_highlight.spans[0].style.bg,
             Some(config.theme.diff_hunk_highlight)

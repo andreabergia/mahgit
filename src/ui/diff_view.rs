@@ -852,7 +852,9 @@ mod tests {
         let lines_with_numbers = diff_view.generate_diff_lines(&diff, diff_view.current_hunk_index);
         // First line after header belongs to the current hunk
         let first_content_line = &lines_with_numbers[1];
-        assert_eq!(first_content_line.spans.len(), 7);
+        // With syntax highlighting enabled, the span count may vary (line prefix + highlighted segments)
+        // but the key elements (line numbers and gutter) should still be present
+        assert!(first_content_line.spans.len() >= 7);
         assert_eq!(first_content_line.spans[0].content, "1");
         assert_eq!(first_content_line.spans[2].content, "1");
         assert_eq!(first_content_line.spans[4].content, "|");
@@ -862,7 +864,8 @@ mod tests {
         let lines_without_numbers = diff_view_no_numbers
             .generate_diff_lines(&diff, diff_view_no_numbers.current_hunk_index);
         let first_line_without_numbers = &lines_without_numbers[1];
-        assert_eq!(first_line_without_numbers.spans.len(), 3);
+        // With syntax highlighting, there may be more than 3 spans (gutter + space + prefix + content segments)
+        assert!(first_line_without_numbers.spans.len() >= 3);
         assert_eq!(first_line_without_numbers.spans[0].content, "|");
     }
 
