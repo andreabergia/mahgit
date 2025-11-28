@@ -1,11 +1,11 @@
 use crate::config::Config;
 use crate::diff::generator::DiffError;
-use crate::diff::{Diff, DiffLine, HunkPosition, LineType};
-use crate::ui::inline_diff::InlineDiffRenderer;
+use crate::diff::{Diff, HunkPosition};
+use crate::ui::diff_renderer::DiffRenderer;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
@@ -22,12 +22,6 @@ pub struct DiffView {
     current_hunk_index: Option<usize>,
     config: Config,
     hunk_positions: Vec<HunkPosition>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct LineNumberWidths {
-    old: usize,
-    new: usize,
 }
 
 impl DiffView {
@@ -213,160 +207,8 @@ impl DiffView {
         diff: &Diff,
         active_hunk_index: Option<usize>,
     ) -> Vec<Line<'static>> {
-        let mut lines = Vec::new();
-        let line_number_widths = if self.config.show_line_numbers {
-            Some(self.calculate_line_number_widths(diff))
-        } else {
-            None
-        };
-
-        for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
-            // Determine if this is the current hunk
-            let is_current_hunk = active_hunk_index == Some(hunk_index);
-
-            // Add hunk header (always use same style now)
-            let header_style = self.config.theme.diff_hunk_header;
-
-            lines.push(Line::from(Span::styled(
-                hunk.header.raw.clone(),
-                header_style,
-            )));
-
-            // Add diff lines
-            for diff_line in &hunk.lines {
-                let line =
-                    self.format_diff_line(diff_line, line_number_widths.as_ref(), is_current_hunk);
-                lines.push(line);
-            }
-        }
-
-        lines
-    }
-
-    fn format_diff_line(
-        &self,
-        diff_line: &DiffLine,
-        line_number_widths: Option<&LineNumberWidths>,
-        is_current_hunk: bool,
-    ) -> Line<'static> {
-        let (prefix, color) = match diff_line.line_type {
-            LineType::Addition => ("+", self.config.theme.staged),
-            LineType::Deletion => ("-", self.config.theme.unstaged),
-            LineType::Context => (" ", self.config.theme.diff_context),
-            LineType::NoNewlineEOF => ("\\", self.config.theme.diff_no_newline),
-        };
-
-        let gutter_color = match diff_line.line_type {
-            LineType::Addition => self.config.theme.diff_gutter_addition,
-            LineType::Deletion => self.config.theme.diff_gutter_deletion,
-            LineType::Context => self.config.theme.diff_gutter_context,
-            LineType::NoNewlineEOF => self.config.theme.diff_no_newline,
-        };
-
-        let mut content_style = Style::default().fg(color);
-        let mut gutter_style = Style::default().fg(gutter_color);
-        if matches!(diff_line.line_type, LineType::Context) && !is_current_hunk {
-            content_style = content_style.add_modifier(Modifier::DIM);
-            gutter_style = gutter_style.add_modifier(Modifier::DIM);
-        }
-
-        if is_current_hunk {
-            gutter_style = gutter_style.bg(self.config.theme.diff_gutter_focused);
-        }
-
-        content_style = self.apply_hunk_highlight(content_style, is_current_hunk);
-        gutter_style = self.apply_hunk_highlight(gutter_style, is_current_hunk);
-
-        // Expand tabs in the line content
-        let expanded_content =
-            crate::config::expand_tabs_with_width(&diff_line.content, self.config.tab_width);
-
-        let mut spans: Vec<Span> = Vec::new();
-
-        if let Some(widths) = line_number_widths {
-            let mut line_number_style = Style::default().fg(self.config.theme.diff_line_number);
-            if matches!(diff_line.line_type, LineType::Context) && !is_current_hunk {
-                line_number_style = line_number_style.add_modifier(Modifier::DIM);
-            }
-            line_number_style = self.apply_hunk_highlight(line_number_style, is_current_hunk);
-
-            spans.push(Span::styled(
-                self.format_line_number(diff_line.old_line_no, widths.old),
-                line_number_style,
-            ));
-            spans.push(Span::styled(" ", line_number_style));
-            spans.push(Span::styled(
-                self.format_line_number(diff_line.new_line_no, widths.new),
-                line_number_style,
-            ));
-            spans.push(Span::styled(" ", line_number_style));
-        }
-
-        spans.push(Span::styled("|", gutter_style));
-        spans.push(Span::styled(
-            " ",
-            self.apply_hunk_highlight(Style::default(), is_current_hunk),
-        ));
-        let content_spans = if let Some(inline_diff) = &diff_line.inline_diff {
-            let renderer = InlineDiffRenderer::new(&self.config);
-            renderer.inline_content_spans(inline_diff, content_style, prefix)
-        } else {
-            vec![Span::styled(
-                format!("{}{}", prefix, expanded_content),
-                content_style,
-            )]
-        };
-
-        spans.extend(content_spans);
-
-        Line::from(spans)
-    }
-
-    fn apply_hunk_highlight(&self, style: Style, is_current_hunk: bool) -> Style {
-        if is_current_hunk {
-            if style.bg.is_some() {
-                style
-            } else {
-                style.bg(self.config.theme.diff_hunk_highlight)
-            }
-        } else {
-            style
-        }
-    }
-
-    fn calculate_line_number_widths(&self, diff: &Diff) -> LineNumberWidths {
-        let mut max_old = 0;
-        let mut max_new = 0;
-
-        for hunk in &diff.hunks {
-            for line in &hunk.lines {
-                if let Some(old) = line.old_line_no {
-                    max_old = max_old.max(old);
-                }
-                if let Some(new) = line.new_line_no {
-                    max_new = max_new.max(new);
-                }
-            }
-        }
-
-        LineNumberWidths {
-            old: Self::digit_width(max_old),
-            new: Self::digit_width(max_new),
-        }
-    }
-
-    fn digit_width(mut value: usize) -> usize {
-        let mut width = 1;
-        while value >= 10 {
-            value /= 10;
-            width += 1;
-        }
-        width
-    }
-
-    fn format_line_number(&self, number: Option<usize>, width: usize) -> String {
-        let text = number.map(|n| n.to_string()).unwrap_or_default();
-        format!("{text:>width$}")
+        let renderer = DiffRenderer::new(&self.config);
+        renderer.generate_diff_lines(diff, active_hunk_index, None)
     }
 
     fn render_scrollbar(
