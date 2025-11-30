@@ -17,6 +17,7 @@ use crate::operations::commit::CommitPreparation;
 use crate::operations::editor;
 use crate::repository::Repository;
 use crate::status::RepositoryStatus;
+use crate::ui::diff_search::{DiffSearchMode, DiffSearchState};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
@@ -62,6 +63,12 @@ enum StageAction {
 enum VerticalDirection {
     Up,
     Down,
+}
+
+#[derive(Clone, Copy)]
+enum SearchDirection {
+    Forward,
+    Backward,
 }
 
 #[derive(Clone)]
@@ -148,6 +155,10 @@ impl App {
             return;
         }
 
+        if self.handle_search_key_event(&key_event) {
+            return;
+        }
+
         let result = self.input_handler.handle_key(key_event);
         match result {
             InputResult::Command(command) => self.handle_command(command),
@@ -172,6 +183,226 @@ impl App {
             let command = self.input_handler.handle_mouse(mouse_event);
             self.handle_command(command);
         }
+    }
+
+    fn handle_search_key_event(&mut self, key_event: &crossterm::event::KeyEvent) -> bool {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        let Some(search_state) = self.current_inline_search_state_mut() else {
+            return false;
+        };
+
+        match search_state.mode {
+            DiffSearchMode::Inactive => {
+                if matches!(
+                    key_event,
+                    crossterm::event::KeyEvent {
+                        code: KeyCode::Char('/'),
+                        modifiers: KeyModifiers::NONE,
+                        ..
+                    }
+                ) {
+                    search_state.mode = DiffSearchMode::Editing;
+                    return true;
+                }
+                return false;
+            }
+            DiffSearchMode::Editing => {
+                if Self::handle_search_edit_input(search_state, key_event) {
+                    return true;
+                }
+                if Self::handle_search_navigation_input(search_state, key_event) {
+                    return true;
+                }
+                return true;
+            }
+            DiffSearchMode::Viewing => {
+                if Self::handle_search_navigation_input(search_state, key_event) {
+                    return true;
+                }
+                match key_event {
+                    crossterm::event::KeyEvent {
+                        code: KeyCode::Esc, ..
+                    } => {
+                        Self::reset_search_state(search_state);
+                        return true;
+                    }
+                    crossterm::event::KeyEvent {
+                        code: KeyCode::Enter,
+                        ..
+                    } => {
+                        Self::ensure_active_search_match(search_state);
+                        return true;
+                    }
+                    crossterm::event::KeyEvent {
+                        code: KeyCode::Char('/'),
+                        modifiers: KeyModifiers::NONE,
+                        ..
+                    } => {
+                        search_state.mode = DiffSearchMode::Editing;
+                        return true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        false
+    }
+
+    fn handle_search_edit_input(
+        search_state: &mut DiffSearchState,
+        key_event: &crossterm::event::KeyEvent,
+    ) -> bool {
+        use crossterm::event::KeyCode;
+
+        match key_event {
+            crossterm::event::KeyEvent {
+                code: KeyCode::Esc, ..
+            } => {
+                Self::reset_search_state(search_state);
+                true
+            }
+            crossterm::event::KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } => {
+                Self::finish_search_edit(search_state);
+                true
+            }
+            crossterm::event::KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            } => {
+                search_state.query.pop();
+                Self::on_search_query_changed(search_state);
+                true
+            }
+            crossterm::event::KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers,
+                ..
+            } if matches!(
+                *modifiers,
+                crossterm::event::KeyModifiers::NONE | crossterm::event::KeyModifiers::SHIFT
+            ) =>
+            {
+                search_state.query.push(*c);
+                Self::on_search_query_changed(search_state);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_search_navigation_input(
+        search_state: &mut DiffSearchState,
+        key_event: &crossterm::event::KeyEvent,
+    ) -> bool {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        match key_event {
+            crossterm::event::KeyEvent {
+                code: KeyCode::Char('n'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+            | crossterm::event::KeyEvent {
+                code: KeyCode::Char('j'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                Self::advance_search_match(search_state, SearchDirection::Forward);
+                true
+            }
+            crossterm::event::KeyEvent {
+                code: KeyCode::Char('N'),
+                modifiers,
+                ..
+            } if *modifiers == KeyModifiers::SHIFT || *modifiers == KeyModifiers::NONE => {
+                Self::advance_search_match(search_state, SearchDirection::Backward);
+                true
+            }
+            crossterm::event::KeyEvent {
+                code: KeyCode::Char('k'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                Self::advance_search_match(search_state, SearchDirection::Backward);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn current_inline_search_state_mut(&mut self) -> Option<&mut DiffSearchState> {
+        if !self.is_inline_diff_focused() {
+            return None;
+        }
+
+        let selected = self.navigation.get_selected_file(&self.status)?;
+        let key = FileDiffKey::new(selected.path.clone(), selected.context);
+        let state = self.navigation.get_file_diff_mut(&key)?;
+
+        state.diff.as_ref()?;
+
+        Some(&mut state.search_state)
+    }
+
+    fn reset_search_state(search_state: &mut DiffSearchState) {
+        search_state.query.clear();
+        search_state.matches.clear();
+        search_state.active_match_index = None;
+        search_state.line_locations.clear();
+        search_state.mode = DiffSearchMode::Inactive;
+    }
+
+    fn on_search_query_changed(search_state: &mut DiffSearchState) {
+        search_state.matches.clear();
+        search_state.active_match_index = None;
+        search_state.line_locations.clear();
+    }
+
+    fn finish_search_edit(search_state: &mut DiffSearchState) {
+        search_state.mode = DiffSearchMode::Viewing;
+        Self::ensure_active_search_match(search_state);
+    }
+
+    fn ensure_active_search_match(search_state: &mut DiffSearchState) {
+        if search_state.matches.is_empty() {
+            search_state.active_match_index = None;
+            return;
+        }
+
+        if let Some(idx) = search_state.active_match_index {
+            if idx >= search_state.matches.len() {
+                search_state.active_match_index = Some(0);
+            }
+        } else {
+            search_state.active_match_index = Some(0);
+        }
+    }
+
+    fn advance_search_match(search_state: &mut DiffSearchState, direction: SearchDirection) {
+        search_state.mode = DiffSearchMode::Viewing;
+        if search_state.matches.is_empty() {
+            search_state.active_match_index = None;
+            return;
+        }
+
+        let count = search_state.matches.len();
+        let next = match search_state.active_match_index {
+            Some(idx) => match direction {
+                SearchDirection::Forward => (idx + 1) % count,
+                SearchDirection::Backward => (idx + count - 1) % count,
+            },
+            None => match direction {
+                SearchDirection::Forward => 0,
+                SearchDirection::Backward => count - 1,
+            },
+        };
+
+        search_state.active_match_index = Some(next);
     }
 
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
