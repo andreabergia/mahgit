@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::diff::Diff;
 use crate::status::{FileEntry, RepositoryStatus};
 use crate::ui::diff_renderer::{DiffRenderer, SearchHighlight};
-use crate::ui::diff_search::{DiffSearchMode, DiffSearchState};
+use crate::ui::diff_search::DiffSearchMode;
 use crate::ui::navigation::{
     FileDiffKey, InlineDiffState, NavigationState, SelectionCursor, StatusSection,
 };
@@ -619,93 +619,10 @@ impl<'a> StatusView<'a> {
                 selected: is_selected,
             });
         }
-
-        if search_active && is_search_context {
-            self.push_search_prompt(items, search_state);
-        }
     }
 }
 
 impl<'a> StatusView<'a> {
-    fn push_search_prompt(&self, items: &mut Vec<ListItem>, search_state: &DiffSearchState) {
-        if matches!(search_state.mode, DiffSearchMode::Inactive) {
-            return;
-        }
-
-        let total = search_state.matches.len();
-        let current = search_state
-            .active_match_index
-            .map(|idx| idx + 1)
-            .unwrap_or(0);
-
-        let mut spans = Vec::new();
-        spans.push(Span::raw("    "));
-        spans.push(Span::styled(
-            "Search: ",
-            Style::default().fg(self.config.theme.diff_line_number),
-        ));
-
-        if search_state.query.is_empty() {
-            spans.push(Span::styled(
-                "<empty>",
-                Style::default()
-                    .fg(self.config.theme.diff_no_newline)
-                    .add_modifier(Modifier::ITALIC),
-            ));
-        } else {
-            spans.push(Span::styled(
-                search_state.query.clone(),
-                Style::default().fg(self.config.theme.search_match_active),
-            ));
-        }
-
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(
-            format!("({}/{})", current, total),
-            Style::default().fg(self.config.theme.search_match_active),
-        ));
-
-        spans.push(Span::raw("  "));
-        spans.push(self.search_flag_span("[Aa]", !search_state.flags.case_sensitive));
-        spans.push(Span::raw(" "));
-        spans.push(self.search_flag_span("[W]", search_state.flags.whole_word));
-        spans.push(Span::raw(" "));
-        spans.push(self.search_flag_span("[.*]", search_state.flags.regex));
-
-        if let Some(error) = &search_state.error {
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                error.clone(),
-                Style::default()
-                    .fg(self.config.theme.unstaged)
-                    .add_modifier(Modifier::ITALIC),
-            ));
-        } else if matches!(search_state.mode, DiffSearchMode::Editing) {
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                "editing",
-                Style::default()
-                    .fg(self.config.theme.untracked)
-                    .add_modifier(Modifier::ITALIC),
-            ));
-        }
-
-        items.push(ListItem::new(Line::from(spans)));
-    }
-
-    fn search_flag_span(&self, label: &str, enabled: bool) -> Span<'static> {
-        let mut style = Style::default().fg(self.config.theme.diff_line_number);
-        if enabled {
-            style = style
-                .fg(self.config.theme.search_match)
-                .add_modifier(Modifier::BOLD);
-        } else {
-            style = style.add_modifier(Modifier::DIM);
-        }
-
-        Span::styled(label.to_string(), style)
-    }
-
     fn inline_diff_indicator(&self, key: &FileDiffKey, is_selected: bool) -> (&'static str, Style) {
         let expanded = self.navigation.is_file_diff_expanded(key);
         let mut icon_style = if expanded {

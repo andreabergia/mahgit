@@ -189,6 +189,57 @@ impl App {
         use crossterm::event::{KeyCode, KeyModifiers};
 
         let tab_width = self.config.tab_width;
+
+        // Special handling for "/" to enter search - auto-expand diff if needed
+        if matches!(
+            key_event,
+            crossterm::event::KeyEvent {
+                code: KeyCode::Char('/'),
+                modifiers: KeyModifiers::NONE,
+                ..
+            }
+        ) {
+            // Try to expand the diff if not already expanded
+            if let Some(selected_file) = self.navigation.get_selected_file(&self.status) {
+                let diff_key = FileDiffKey::new(selected_file.path.clone(), selected_file.context);
+
+                // If diff is not expanded, expand it first
+                if !self.navigation.is_file_diff_expanded(&diff_key) {
+                    let diff_context = self.determine_diff_context(&selected_file);
+
+                    // Check if we have a cached diff
+                    if self
+                        .navigation
+                        .has_cached_diff_for(&diff_key, &diff_context)
+                    {
+                        self.navigation
+                            .toggle_file_diff_expanded(diff_key.clone(), diff_context.clone());
+                    } else {
+                        // Generate the diff
+                        let diff_generator = DiffGenerator::new(self.repository.git2_repo());
+                        match diff_generator
+                            .generate_diff(&selected_file.path, diff_context.clone())
+                        {
+                            Ok(diff) => {
+                                // set_file_diff already sets expanded = true, so no need to toggle
+                                self.navigation
+                                    .set_file_diff(diff_key.clone(), diff, diff_context);
+                            }
+                            Err(err) => {
+                                self.feedback_manager.show_result(
+                                    crate::operations::OperationResult::new(format!(
+                                        "Failed to generate diff for {}: {}",
+                                        selected_file.path, err
+                                    )),
+                                );
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let Some(inline_state) = self.current_inline_diff_state_mut() else {
             return false;
         };
@@ -1338,7 +1389,12 @@ impl App {
             self.render_help_overlay(f);
         }
 
-        // 4. Render active modal (if any) - renders on top
+        // 4. Render search prompt overlay (if active)
+        if let Some(search_state) = self.get_active_search_state() {
+            self.render_search_prompt_overlay(f, search_state);
+        }
+
+        // 5. Render active modal (if any) - renders on top
         if let Some(modal) = &self.active_modal {
             modal.render(f, area, &self.config);
         }
@@ -1379,6 +1435,152 @@ impl App {
             .style(Style::default().fg(Color::White));
 
         f.render_widget(paragraph, feedback_area);
+    }
+
+    fn get_active_search_state(&self) -> Option<&DiffSearchState> {
+        // Get the currently selected file's diff key
+        let cursor = self.navigation.current_cursor()?;
+        let (section, file_index) = match cursor {
+            SelectionCursor::File {
+                section,
+                file_index,
+            }
+            | SelectionCursor::Hunk {
+                section,
+                file_index,
+                ..
+            } => (section, file_index),
+        };
+
+        // Get the file entry to build the diff key
+        let file_entry = match section {
+            navigation::StatusSection::Staged => self.status.staged_files().get(file_index)?,
+            navigation::StatusSection::Unstaged => self.status.unstaged_files().get(file_index)?,
+            navigation::StatusSection::Untracked => {
+                // Untracked files don't have diffs
+                return None;
+            }
+            navigation::StatusSection::Conflicted => {
+                // Conflicted files might not have search
+                return None;
+            }
+        };
+
+        let diff_key = FileDiffKey::new(file_entry.path.clone(), section.into());
+        let diff_state = self.navigation.get_file_diff(&diff_key)?;
+
+        // Only return search state if it's not inactive
+        if matches!(diff_state.search_state.mode, DiffSearchMode::Inactive) {
+            None
+        } else {
+            Some(&diff_state.search_state)
+        }
+    }
+
+    fn render_search_prompt_overlay(&self, f: &mut ratatui::Frame, search_state: &DiffSearchState) {
+        use ratatui::{
+            layout::Rect,
+            style::{Color, Modifier, Style},
+            text::{Line, Span},
+            widgets::{Block, Borders, Clear, Paragraph},
+        };
+
+        let area = f.area();
+
+        // Create a small area at the bottom for the search prompt (3 lines: top border + content + padding)
+        let prompt_area = Rect {
+            x: 0,
+            y: area.height.saturating_sub(3),
+            width: area.width,
+            height: 3,
+        };
+
+        // Clear the area
+        f.render_widget(Clear, prompt_area);
+
+        let total = search_state.matches.len();
+        let current = search_state
+            .active_match_index
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+
+        let mut spans = Vec::new();
+        spans.push(Span::styled(
+            "Search: ",
+            Style::default()
+                .fg(self.config.theme.diff_line_number)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+        if search_state.query.is_empty() {
+            spans.push(Span::styled(
+                "<empty>",
+                Style::default()
+                    .fg(self.config.theme.diff_no_newline)
+                    .add_modifier(Modifier::ITALIC),
+            ));
+        } else {
+            let cursor_char = if matches!(search_state.mode, DiffSearchMode::Editing) {
+                "_"
+            } else {
+                ""
+            };
+            spans.push(Span::styled(
+                format!("{}{}", search_state.query, cursor_char),
+                Style::default()
+                    .fg(self.config.theme.search_match_active)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("({}/{})", current, total),
+            Style::default().fg(self.config.theme.diff_line_number),
+        ));
+
+        spans.push(Span::raw("  "));
+        spans.push(self.search_flag_span("[Aa]", !search_state.flags.case_sensitive));
+        spans.push(Span::raw(" "));
+        spans.push(self.search_flag_span("[W]", search_state.flags.whole_word));
+        spans.push(Span::raw(" "));
+        spans.push(self.search_flag_span("[.*]", search_state.flags.regex));
+
+        if let Some(error) = &search_state.error {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                format!("Error: {}", error),
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::ITALIC),
+            ));
+        }
+
+        let line = Line::from(spans);
+        let block = Block::default()
+            .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+            .style(Style::default().bg(Color::Rgb(20, 20, 20)));
+
+        let paragraph = Paragraph::new(line).block(block);
+
+        f.render_widget(paragraph, prompt_area);
+    }
+
+    fn search_flag_span(&self, label: &str, enabled: bool) -> ratatui::text::Span<'static> {
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::Span;
+
+        let style = if enabled {
+            Style::default()
+                .fg(self.config.theme.search_match)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(self.config.theme.diff_line_number)
+                .add_modifier(Modifier::DIM)
+        };
+
+        Span::styled(label.to_string(), style)
     }
 
     fn render_help_overlay(&self, f: &mut ratatui::Frame) {
@@ -2001,6 +2203,277 @@ mod tests {
         assert_eq!(state.search_state.mode, DiffSearchMode::Editing);
         assert_eq!(state.search_state.matches.len(), 2);
         assert_eq!(state.search_state.active_match_index, Some(0));
+    }
+
+    #[test]
+    fn search_auto_expands_collapsed_diff() {
+        use crate::status::RepositoryStatus;
+        use crate::ui::navigation::FileContext;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let (repo, tmp) = create_test_repo("search_auto_expand");
+        let repo_path = tmp.path();
+
+        // Create a file with content
+        create_test_file(repo_path, "file.txt", "hello world\n");
+        repo.add_to_index("file.txt").unwrap();
+
+        let commit_ops = CommitOperations::new(&repo);
+        commit_ops
+            .execute_commit("Initial commit", &Default::default())
+            .unwrap();
+
+        // Modify the file
+        create_test_file(repo_path, "file.txt", "hello search target\n");
+
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let config = create_test_config();
+        let mut app = App::new(repo, status, config);
+
+        let key = FileDiffKey::new("file.txt".to_string(), FileContext::Unstaged);
+
+        // Verify diff is not expanded initially
+        assert!(!app.navigation.is_file_diff_expanded(&key));
+
+        // Press "/" to enter search - should auto-expand the diff
+        app.process_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+
+        // Verify diff is now expanded
+        assert!(app.navigation.is_file_diff_expanded(&key));
+
+        // Verify search mode is active
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(state.search_state.mode, DiffSearchMode::Editing);
+    }
+
+    #[test]
+    fn search_navigation_cycles_through_matches() {
+        use crate::diff::DiffContext;
+        use crate::status::{FileEntry, FileStatus, RepositoryStatus};
+        use crate::ui::navigation::FileContext;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let (repo, _tmp) = create_test_repo("search_navigation");
+        let status = RepositoryStatus {
+            branch_name: "main".to_string(),
+            staged: vec![],
+            unstaged: vec![FileEntry::new("file.txt".to_string(), FileStatus::Modified)],
+            untracked: vec![],
+            conflicted: vec![],
+        };
+        let config = create_test_config();
+        let mut app = App::new(repo, status, config);
+
+        let key = FileDiffKey::new("file.txt".to_string(), FileContext::Unstaged);
+        let diff = sample_search_diff();
+        app.navigation
+            .set_file_diff(key.clone(), diff, DiffContext::WorkingTreeToIndex);
+
+        // Enter search and type query
+        app.process_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.process_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(state.search_state.query, "t", "Query should be 't'");
+        assert_eq!(state.search_state.matches.len(), 2, "Should have 2 matches");
+        assert_eq!(
+            state.search_state.active_match_index,
+            Some(0),
+            "Active match should be 0"
+        );
+
+        // Finish editing first (press Enter) before navigating
+        app.process_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(
+            state.search_state.mode,
+            DiffSearchMode::Viewing,
+            "Should be in Viewing mode"
+        );
+
+        // Navigate forward (n)
+        app.process_key_event(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(
+            state.search_state.active_match_index,
+            Some(1),
+            "Active match should be 1 after pressing 'n'"
+        );
+
+        // Navigate forward again - should wrap to 0
+        app.process_key_event(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(
+            state.search_state.active_match_index,
+            Some(0),
+            "Active match should wrap to 0"
+        );
+
+        // Navigate backward (N)
+        app.process_key_event(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT));
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(
+            state.search_state.active_match_index,
+            Some(1),
+            "Active match should be 1 after pressing 'N'"
+        );
+    }
+
+    #[test]
+    fn search_escape_cancels_and_clears() {
+        use crate::diff::DiffContext;
+        use crate::status::{FileEntry, FileStatus, RepositoryStatus};
+        use crate::ui::navigation::FileContext;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let (repo, _tmp) = create_test_repo("search_escape");
+        let status = RepositoryStatus {
+            branch_name: "main".to_string(),
+            staged: vec![],
+            unstaged: vec![FileEntry::new("file.txt".to_string(), FileStatus::Modified)],
+            untracked: vec![],
+            conflicted: vec![],
+        };
+        let config = create_test_config();
+        let mut app = App::new(repo, status, config);
+
+        let key = FileDiffKey::new("file.txt".to_string(), FileContext::Unstaged);
+        let diff = sample_search_diff();
+        app.navigation
+            .set_file_diff(key.clone(), diff, DiffContext::WorkingTreeToIndex);
+
+        // Enter search and type query
+        app.process_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.process_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert!(!state.search_state.query.is_empty());
+        assert_eq!(state.search_state.mode, DiffSearchMode::Editing);
+
+        // Press Escape to cancel
+        app.process_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert!(state.search_state.query.is_empty());
+        assert!(state.search_state.matches.is_empty());
+        assert_eq!(state.search_state.mode, DiffSearchMode::Inactive);
+    }
+
+    #[test]
+    fn search_enter_finishes_editing_mode() {
+        use crate::diff::DiffContext;
+        use crate::status::{FileEntry, FileStatus, RepositoryStatus};
+        use crate::ui::navigation::FileContext;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let (repo, _tmp) = create_test_repo("search_enter");
+        let status = RepositoryStatus {
+            branch_name: "main".to_string(),
+            staged: vec![],
+            unstaged: vec![FileEntry::new("file.txt".to_string(), FileStatus::Modified)],
+            untracked: vec![],
+            conflicted: vec![],
+        };
+        let config = create_test_config();
+        let mut app = App::new(repo, status, config);
+
+        let key = FileDiffKey::new("file.txt".to_string(), FileContext::Unstaged);
+        let diff = sample_search_diff();
+        app.navigation
+            .set_file_diff(key.clone(), diff, DiffContext::WorkingTreeToIndex);
+
+        // Enter search and type query
+        app.process_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.process_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(state.search_state.mode, DiffSearchMode::Editing);
+
+        // Press Enter to finish editing
+        app.process_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(state.search_state.mode, DiffSearchMode::Viewing);
+        assert!(!state.search_state.query.is_empty());
+        assert!(!state.search_state.matches.is_empty());
+    }
+
+    #[test]
+    fn search_slash_resumes_editing() {
+        use crate::diff::DiffContext;
+        use crate::status::{FileEntry, FileStatus, RepositoryStatus};
+        use crate::ui::navigation::FileContext;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let (repo, _tmp) = create_test_repo("search_resume");
+        let status = RepositoryStatus {
+            branch_name: "main".to_string(),
+            staged: vec![],
+            unstaged: vec![FileEntry::new("file.txt".to_string(), FileStatus::Modified)],
+            untracked: vec![],
+            conflicted: vec![],
+        };
+        let config = create_test_config();
+        let mut app = App::new(repo, status, config);
+
+        let key = FileDiffKey::new("file.txt".to_string(), FileContext::Unstaged);
+        let diff = sample_search_diff();
+        app.navigation
+            .set_file_diff(key.clone(), diff, DiffContext::WorkingTreeToIndex);
+
+        // Enter search, type query, and finish editing
+        app.process_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.process_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        app.process_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(state.search_state.mode, DiffSearchMode::Viewing);
+
+        // Press "/" again to resume editing
+        app.process_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(state.search_state.mode, DiffSearchMode::Editing);
+        assert_eq!(state.search_state.query, "t"); // Query is preserved
+    }
+
+    #[test]
+    fn search_backspace_removes_characters() {
+        use crate::diff::DiffContext;
+        use crate::status::{FileEntry, FileStatus, RepositoryStatus};
+        use crate::ui::navigation::FileContext;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let (repo, _tmp) = create_test_repo("search_backspace");
+        let status = RepositoryStatus {
+            branch_name: "main".to_string(),
+            staged: vec![],
+            unstaged: vec![FileEntry::new("file.txt".to_string(), FileStatus::Modified)],
+            untracked: vec![],
+            conflicted: vec![],
+        };
+        let config = create_test_config();
+        let mut app = App::new(repo, status, config);
+
+        let key = FileDiffKey::new("file.txt".to_string(), FileContext::Unstaged);
+        let diff = sample_search_diff();
+        app.navigation
+            .set_file_diff(key.clone(), diff, DiffContext::WorkingTreeToIndex);
+
+        // Enter search and type query
+        app.process_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.process_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        app.process_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(state.search_state.query, "te");
+
+        // Press Backspace
+        app.process_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(state.search_state.query, "t");
     }
 
     #[test]
