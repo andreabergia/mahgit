@@ -23,6 +23,8 @@ pub struct Theme {
     pub diff_inline_deletion: Color,
     pub help_key: Color,
     pub help_desc: Color,
+    pub search_match: Color,
+    pub search_match_active: Color,
 }
 
 impl Default for Theme {
@@ -67,6 +69,8 @@ impl Theme {
             diff_inline_deletion: Color::Rgb(81, 38, 33), // muted red block highlight
             help_key: Color::Rgb(127, 219, 202),        // #7FDBCA
             help_desc: Color::Rgb(201, 209, 217),       // #C9D1D9
+            search_match: Color::Rgb(76, 110, 179),     // muted blue highlight
+            search_match_active: Color::Rgb(214, 156, 52), // amber for active match
         }
     }
 }

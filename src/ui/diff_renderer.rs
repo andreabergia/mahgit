@@ -13,6 +13,13 @@ pub struct LineNumberWidths {
     pub new: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SearchHighlight {
+    pub start: usize,
+    pub length: usize,
+    pub is_active: bool,
+}
+
 pub struct DiffRenderer<'a> {
     config: &'a Config,
 }
@@ -57,6 +64,7 @@ impl<'a> DiffRenderContext<'a> {
         is_active_hunk: bool,
         prefix: Option<&str>,
         highlighter: Option<&mut HighlightLines<'static>>,
+        search_highlights: Option<&[SearchHighlight]>,
     ) -> Line<'static> {
         let syntax_state = if let (Some(syntax), Some(hl)) = (self.syntax_ref, highlighter) {
             Some((syntax, hl))
@@ -70,6 +78,7 @@ impl<'a> DiffRenderContext<'a> {
             is_active_hunk,
             prefix,
             syntax_state,
+            search_highlights,
         )
     }
 }
@@ -125,6 +134,7 @@ impl<'a> DiffRenderer<'a> {
         is_active_hunk: bool,
         prefix: Option<&str>,
         syntax_state: Option<(&SyntaxReference, &mut HighlightLines)>,
+        search_highlights: Option<&[SearchHighlight]>,
     ) -> Line<'static> {
         let (line_prefix, color) = match diff_line.line_type {
             LineType::Addition => ("+", self.config.theme.staged),
@@ -213,7 +223,7 @@ impl<'a> DiffRenderer<'a> {
             self.apply_hunk_highlight(Style::default(), is_active_hunk),
         ));
 
-        let content_spans = if let Some((syntax_ref, highlighter)) = syntax_state {
+        let mut content_spans = if let Some((syntax_ref, highlighter)) = syntax_state {
             // Prefer syntax highlighting over inline diffs when available
             let syntax_highlighter = syntax_highlighter();
             let highlighted =
@@ -251,6 +261,15 @@ impl<'a> DiffRenderer<'a> {
                 content_style,
             )]
         };
+
+        if let Some(highlights) = search_highlights.filter(|h| !h.is_empty()) {
+            let match_style = Style::default().bg(self.config.theme.search_match);
+            let active_style = Style::default()
+                .bg(self.config.theme.search_match_active)
+                .add_modifier(Modifier::BOLD);
+            content_spans =
+                Self::apply_search_highlights(content_spans, highlights, match_style, active_style);
+        }
 
         spans.extend(content_spans);
 
@@ -295,12 +314,80 @@ impl<'a> DiffRenderer<'a> {
                     is_current_hunk,
                     prefix,
                     highlighter.as_mut(),
+                    None,
                 );
                 lines.push(line);
             }
         }
 
         lines
+    }
+
+    fn apply_search_highlights(
+        spans: Vec<Span<'static>>,
+        highlights: &[SearchHighlight],
+        match_style: Style,
+        active_style: Style,
+    ) -> Vec<Span<'static>> {
+        if highlights.is_empty() || spans.is_empty() {
+            return spans;
+        }
+
+        let mut flat: Vec<(Style, char)> = Vec::new();
+        for span in spans {
+            let style = span.style;
+            for ch in span.content.chars() {
+                flat.push((style, ch));
+            }
+        }
+
+        let total_len = flat.len();
+        for highlight in highlights {
+            if highlight.length == 0 || highlight.start >= total_len {
+                continue;
+            }
+
+            let start = highlight.start;
+            let end = (highlight.start + highlight.length).min(total_len);
+            if end <= start {
+                continue;
+            }
+            let overlay = if highlight.is_active {
+                active_style
+            } else {
+                match_style
+            };
+
+            for (style, _) in flat.iter_mut().skip(start).take(end - start) {
+                *style = style.patch(overlay);
+            }
+        }
+
+        let mut result: Vec<Span<'static>> = Vec::new();
+        let mut current_style: Option<Style> = None;
+        let mut buffer = String::new();
+
+        for (style, ch) in flat {
+            match current_style {
+                Some(active_style) if active_style == style => buffer.push(ch),
+                Some(active_style) => {
+                    let flushed = std::mem::take(&mut buffer);
+                    result.push(Span::styled(flushed, active_style));
+                    buffer.push(ch);
+                    current_style = Some(style);
+                }
+                None => {
+                    buffer.push(ch);
+                    current_style = Some(style);
+                }
+            }
+        }
+
+        if let Some(style) = current_style {
+            result.push(Span::styled(buffer, style));
+        }
+
+        result
     }
 
     fn apply_hunk_highlight(&self, style: Style, is_current_hunk: bool) -> Style {
@@ -398,8 +485,14 @@ mod tests {
         let diff = create_test_diff();
         let widths = DiffRenderer::calculate_line_number_widths(&diff);
 
-        let line =
-            renderer.format_diff_line(&diff.hunks[0].lines[0], Some(&widths), false, None, None);
+        let line = renderer.format_diff_line(
+            &diff.hunks[0].lines[0],
+            Some(&widths),
+            false,
+            None,
+            None,
+            None,
+        );
 
         // Should have: old_line, space, new_line, space, gutter, space, content
         assert!(line.spans.len() >= 7);
@@ -415,7 +508,8 @@ mod tests {
         let renderer = DiffRenderer::new(&config);
         let diff = create_test_diff();
 
-        let line = renderer.format_diff_line(&diff.hunks[0].lines[0], None, false, None, None);
+        let line =
+            renderer.format_diff_line(&diff.hunks[0].lines[0], None, false, None, None, None);
 
         // Should have: gutter, space, content (no line numbers)
         assert_eq!(line.spans.len(), 3);
@@ -428,8 +522,14 @@ mod tests {
         let renderer = DiffRenderer::new(&config);
         let diff = create_test_diff();
 
-        let line =
-            renderer.format_diff_line(&diff.hunks[0].lines[0], None, false, Some("    "), None);
+        let line = renderer.format_diff_line(
+            &diff.hunks[0].lines[0],
+            None,
+            false,
+            Some("    "),
+            None,
+            None,
+        );
 
         // First span should be the prefix
         assert_eq!(line.spans[0].content, "    ");
@@ -459,13 +559,25 @@ mod tests {
         let widths = DiffRenderer::calculate_line_number_widths(&diff);
 
         // Without highlighting
-        let line_no_highlight =
-            renderer.format_diff_line(&diff.hunks[0].lines[0], Some(&widths), false, None, None);
+        let line_no_highlight = renderer.format_diff_line(
+            &diff.hunks[0].lines[0],
+            Some(&widths),
+            false,
+            None,
+            None,
+            None,
+        );
         assert_eq!(line_no_highlight.spans[0].style.bg, None);
 
         // With highlighting
-        let line_with_highlight =
-            renderer.format_diff_line(&diff.hunks[0].lines[0], Some(&widths), true, None, None);
+        let line_with_highlight = renderer.format_diff_line(
+            &diff.hunks[0].lines[0],
+            Some(&widths),
+            true,
+            None,
+            None,
+            None,
+        );
         assert_eq!(
             line_with_highlight.spans[0].style.bg,
             Some(config.theme.diff_hunk_highlight)

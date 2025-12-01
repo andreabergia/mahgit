@@ -17,7 +17,7 @@ use crate::operations::commit::CommitPreparation;
 use crate::operations::editor;
 use crate::repository::Repository;
 use crate::status::RepositoryStatus;
-use crate::ui::diff_search::{DiffSearchMode, DiffSearchState};
+use crate::ui::diff_search::{DiffLineKind, DiffLineLocation, DiffSearchMode, DiffSearchState};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
@@ -26,7 +26,7 @@ use crossterm::{
 use feedback::FeedbackManager;
 use input::{Command, InputHandler};
 use modals::{BoxedModal, ModalContext};
-use navigation::{FileDiffKey, NavigationState, SelectedFile, SelectionCursor};
+use navigation::{FileDiffKey, InlineDiffState, NavigationState, SelectedFile, SelectionCursor};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use status_view::StatusView;
 use std::io::{Stdout, stdout};
@@ -188,11 +188,12 @@ impl App {
     fn handle_search_key_event(&mut self, key_event: &crossterm::event::KeyEvent) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
 
-        let Some(search_state) = self.current_inline_search_state_mut() else {
+        let tab_width = self.config.tab_width;
+        let Some(inline_state) = self.current_inline_diff_state_mut() else {
             return false;
         };
 
-        match search_state.mode {
+        match inline_state.search_state.mode {
             DiffSearchMode::Inactive => {
                 if matches!(
                     key_event,
@@ -202,36 +203,55 @@ impl App {
                         ..
                     }
                 ) {
-                    search_state.mode = DiffSearchMode::Editing;
+                    inline_state.search_state.mode = DiffSearchMode::Editing;
+                    inline_state.search_state.dirty = true;
+                    Self::recompute_search_state(inline_state, tab_width);
                     return true;
                 }
-                return false;
+                false
             }
             DiffSearchMode::Editing => {
-                if Self::handle_search_edit_input(search_state, key_event) {
+                let handled_edit = {
+                    let search_state = &mut inline_state.search_state;
+                    Self::handle_search_edit_input(search_state, key_event)
+                };
+                let handled_nav = Self::handle_search_navigation_input(inline_state, key_event);
+
+                if handled_edit || handled_nav {
+                    Self::recompute_search_state(inline_state, tab_width);
+                    if Self::focus_active_search_match(inline_state) {
+                        Self::recompute_search_state(inline_state, tab_width);
+                    }
                     return true;
                 }
-                if Self::handle_search_navigation_input(search_state, key_event) {
-                    return true;
-                }
-                return true;
+                true
             }
             DiffSearchMode::Viewing => {
-                if Self::handle_search_navigation_input(search_state, key_event) {
+                if Self::handle_search_navigation_input(inline_state, key_event) {
+                    Self::recompute_search_state(inline_state, tab_width);
+                    if Self::focus_active_search_match(inline_state) {
+                        Self::recompute_search_state(inline_state, tab_width);
+                    }
                     return true;
                 }
                 match key_event {
                     crossterm::event::KeyEvent {
                         code: KeyCode::Esc, ..
                     } => {
+                        let search_state = &mut inline_state.search_state;
                         Self::reset_search_state(search_state);
+                        Self::recompute_search_state(inline_state, tab_width);
                         return true;
                     }
                     crossterm::event::KeyEvent {
                         code: KeyCode::Enter,
                         ..
                     } => {
+                        let search_state = &mut inline_state.search_state;
                         Self::ensure_active_search_match(search_state);
+                        if Self::focus_active_search_match(inline_state) {
+                            Self::recompute_search_state(inline_state, tab_width);
+                        }
                         return true;
                     }
                     crossterm::event::KeyEvent {
@@ -239,15 +259,15 @@ impl App {
                         modifiers: KeyModifiers::NONE,
                         ..
                     } => {
-                        search_state.mode = DiffSearchMode::Editing;
+                        inline_state.search_state.mode = DiffSearchMode::Editing;
+                        inline_state.search_state.dirty = true;
                         return true;
                     }
                     _ => {}
                 }
+                false
             }
         }
-
-        false
     }
 
     fn handle_search_edit_input(
@@ -275,7 +295,8 @@ impl App {
                 ..
             } => {
                 search_state.query.pop();
-                Self::on_search_query_changed(search_state);
+                search_state.dirty = true;
+                search_state.error = None;
                 true
             }
             crossterm::event::KeyEvent {
@@ -288,7 +309,8 @@ impl App {
             ) =>
             {
                 search_state.query.push(*c);
-                Self::on_search_query_changed(search_state);
+                search_state.dirty = true;
+                search_state.error = None;
                 true
             }
             _ => false,
@@ -296,7 +318,7 @@ impl App {
     }
 
     fn handle_search_navigation_input(
-        search_state: &mut DiffSearchState,
+        inline_state: &mut InlineDiffState,
         key_event: &crossterm::event::KeyEvent,
     ) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
@@ -312,7 +334,7 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                Self::advance_search_match(search_state, SearchDirection::Forward);
+                Self::advance_search_match(inline_state, SearchDirection::Forward);
                 true
             }
             crossterm::event::KeyEvent {
@@ -320,7 +342,7 @@ impl App {
                 modifiers,
                 ..
             } if *modifiers == KeyModifiers::SHIFT || *modifiers == KeyModifiers::NONE => {
-                Self::advance_search_match(search_state, SearchDirection::Backward);
+                Self::advance_search_match(inline_state, SearchDirection::Backward);
                 true
             }
             crossterm::event::KeyEvent {
@@ -328,25 +350,25 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                Self::advance_search_match(search_state, SearchDirection::Backward);
+                Self::advance_search_match(inline_state, SearchDirection::Backward);
                 true
             }
             _ => false,
         }
     }
 
-    fn current_inline_search_state_mut(&mut self) -> Option<&mut DiffSearchState> {
-        if !self.is_inline_diff_focused() {
-            return None;
-        }
-
+    fn current_inline_diff_state_mut(&mut self) -> Option<&mut InlineDiffState> {
         let selected = self.navigation.get_selected_file(&self.status)?;
         let key = FileDiffKey::new(selected.path.clone(), selected.context);
         let state = self.navigation.get_file_diff_mut(&key)?;
 
+        if !state.expanded {
+            return None;
+        }
+
         state.diff.as_ref()?;
 
-        Some(&mut state.search_state)
+        Some(state)
     }
 
     fn reset_search_state(search_state: &mut DiffSearchState) {
@@ -355,12 +377,8 @@ impl App {
         search_state.active_match_index = None;
         search_state.line_locations.clear();
         search_state.mode = DiffSearchMode::Inactive;
-    }
-
-    fn on_search_query_changed(search_state: &mut DiffSearchState) {
-        search_state.matches.clear();
-        search_state.active_match_index = None;
-        search_state.line_locations.clear();
+        search_state.error = None;
+        search_state.dirty = false;
     }
 
     fn finish_search_edit(search_state: &mut DiffSearchState) {
@@ -383,7 +401,8 @@ impl App {
         }
     }
 
-    fn advance_search_match(search_state: &mut DiffSearchState, direction: SearchDirection) {
+    fn advance_search_match(inline_state: &mut InlineDiffState, direction: SearchDirection) {
+        let search_state = &mut inline_state.search_state;
         search_state.mode = DiffSearchMode::Viewing;
         if search_state.matches.is_empty() {
             search_state.active_match_index = None;
@@ -403,6 +422,119 @@ impl App {
         };
 
         search_state.active_match_index = Some(next);
+        // Ensure matches in collapsed hunks become visible
+        if let Some(active) = search_state.matches.get(next)
+            && inline_state.collapsed_hunks.remove(&active.hunk_index)
+        {
+            search_state.dirty = true;
+            search_state.line_locations.clear();
+        }
+    }
+
+    fn recompute_search_state(inline_state: &mut InlineDiffState, tab_width: usize) {
+        inline_state.search_state.line_locations = Self::build_line_locations(inline_state);
+
+        let Some(diff) = inline_state.diff.as_ref() else {
+            inline_state.search_state.matches.clear();
+            inline_state.search_state.active_match_index = None;
+            inline_state.search_state.error = None;
+            inline_state.search_state.dirty = false;
+            return;
+        };
+
+        let search_state = &mut inline_state.search_state;
+
+        if search_state.query.is_empty() {
+            search_state.matches.clear();
+            search_state.active_match_index = None;
+            search_state.error = None;
+            search_state.dirty = false;
+            return;
+        }
+
+        if search_state.dirty {
+            match crate::ui::diff_search::find_matches_in_diff(
+                diff,
+                &search_state.query,
+                &search_state.flags,
+                tab_width,
+            ) {
+                Ok(matches) => {
+                    search_state.matches = matches;
+                    search_state.error = None;
+                    if search_state.matches.is_empty() {
+                        search_state.active_match_index = None;
+                    } else {
+                        search_state.active_match_index = Some(0);
+                    }
+                }
+                Err(err) => {
+                    search_state.error = Some(err.to_string());
+                }
+            }
+            search_state.dirty = false;
+        }
+
+        Self::ensure_active_search_match(search_state);
+    }
+
+    fn build_line_locations(inline_state: &InlineDiffState) -> Vec<DiffLineLocation> {
+        let mut locations = Vec::new();
+        let Some(diff) = inline_state.diff.as_ref() else {
+            return locations;
+        };
+
+        for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
+            locations.push(DiffLineLocation {
+                hunk_index,
+                kind: DiffLineKind::Header,
+            });
+
+            if !inline_state.collapsed_hunks.contains(&hunk_index) {
+                for line_index in 0..hunk.lines.len() {
+                    locations.push(DiffLineLocation {
+                        hunk_index,
+                        kind: DiffLineKind::Line { line_index },
+                    });
+                }
+            }
+
+            if diff.hunks.len() > 1 {
+                locations.push(DiffLineLocation {
+                    hunk_index,
+                    kind: DiffLineKind::Separator,
+                });
+            }
+        }
+
+        locations
+    }
+
+    fn focus_active_search_match(inline_state: &mut InlineDiffState) -> bool {
+        let Some(active_idx) = inline_state.search_state.active_match_index else {
+            return false;
+        };
+        let Some(active_match) = inline_state.search_state.matches.get(active_idx) else {
+            return false;
+        };
+
+        if inline_state
+            .collapsed_hunks
+            .remove(&active_match.hunk_index)
+        {
+            inline_state.search_state.dirty = true;
+            inline_state.search_state.line_locations.clear();
+            return true;
+        }
+
+        false
+    }
+
+    fn refresh_active_diff_search(&mut self) {
+        let tab_width = self.config.tab_width;
+        if let Some(inline_state) = self.current_inline_diff_state_mut() {
+            Self::recompute_search_state(inline_state, tab_width);
+        }
     }
 
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -1189,6 +1321,7 @@ impl App {
 
     pub fn render(&mut self, f: &mut ratatui::Frame) {
         self.navigation.ensure_cursor_valid(&self.status);
+        self.refresh_active_diff_search();
         let area = f.area();
 
         // 1. Always render the status view (now with inline diffs)
@@ -1727,6 +1860,37 @@ mod tests {
         (repository, temp_dir)
     }
 
+    fn sample_search_diff() -> crate::diff::Diff {
+        use crate::diff::{DiffContext, DiffHunk, DiffLine, HunkHeader, LineRange, LineType};
+        let hunk = DiffHunk {
+            header: HunkHeader {
+                raw: "@@ -1,1 +1,1 @@".to_string(),
+                old_start: 1,
+                old_lines: 1,
+                new_start: 1,
+                new_lines: 1,
+            },
+            old_range: LineRange { start: 1, count: 1 },
+            new_range: LineRange { start: 1, count: 1 },
+            stageable: true,
+            context_lines: 1,
+            lines: vec![DiffLine {
+                content: "search target line".to_string(),
+                line_type: LineType::Context,
+                old_line_no: Some(1),
+                new_line_no: Some(1),
+                inline_diff: None,
+            }],
+        };
+
+        crate::diff::Diff {
+            file_path: "file.txt".to_string(),
+            context: DiffContext::WorkingTreeToIndex,
+            hunks: vec![hunk],
+            binary: false,
+        }
+    }
+
     fn create_test_file(repo_dir: &std::path::Path, name: &str, content: &str) {
         let file_path = repo_dir.join(name);
         fs::write(&file_path, content).unwrap();
@@ -1770,6 +1934,73 @@ mod tests {
 
         // Clean up
         fs::remove_file(temp_file).ok();
+    }
+
+    #[test]
+    fn search_starts_from_file_selection_when_diff_expanded() {
+        use crate::diff::DiffContext;
+        use crate::status::{FileEntry, FileStatus, RepositoryStatus};
+        use crate::ui::navigation::FileContext;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let (repo, _tmp) = create_test_repo("search_file_selection");
+        let status = RepositoryStatus {
+            branch_name: "main".to_string(),
+            staged: vec![],
+            unstaged: vec![FileEntry::new("file.txt".to_string(), FileStatus::Modified)],
+            untracked: vec![],
+            conflicted: vec![],
+        };
+        let config = create_test_config();
+        let mut app = App::new(repo, status, config);
+
+        let key = FileDiffKey::new("file.txt".to_string(), FileContext::Unstaged);
+        let diff = sample_search_diff();
+        app.navigation
+            .set_file_diff(key.clone(), diff, DiffContext::WorkingTreeToIndex);
+
+        assert!(matches!(
+            app.navigation.current_cursor(),
+            Some(SelectionCursor::File { .. })
+        ));
+
+        app.process_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(state.search_state.mode, DiffSearchMode::Editing);
+    }
+
+    #[test]
+    fn search_collects_matches_while_editing() {
+        use crate::diff::DiffContext;
+        use crate::status::{FileEntry, FileStatus, RepositoryStatus};
+        use crate::ui::navigation::FileContext;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let (repo, _tmp) = create_test_repo("search_collects_matches");
+        let status = RepositoryStatus {
+            branch_name: "main".to_string(),
+            staged: vec![],
+            unstaged: vec![FileEntry::new("file.txt".to_string(), FileStatus::Modified)],
+            untracked: vec![],
+            conflicted: vec![],
+        };
+        let config = create_test_config();
+        let mut app = App::new(repo, status, config);
+
+        let key = FileDiffKey::new("file.txt".to_string(), FileContext::Unstaged);
+        let diff = sample_search_diff();
+        app.navigation
+            .set_file_diff(key.clone(), diff, DiffContext::WorkingTreeToIndex);
+
+        app.process_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.process_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+
+        let state = app.navigation.get_file_diff(&key).unwrap();
+        assert_eq!(state.search_state.query, "t");
+        assert_eq!(state.search_state.mode, DiffSearchMode::Editing);
+        assert_eq!(state.search_state.matches.len(), 2);
+        assert_eq!(state.search_state.active_match_index, Some(0));
     }
 
     #[test]

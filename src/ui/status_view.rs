@@ -1,8 +1,11 @@
 use crate::config::Config;
 use crate::diff::Diff;
 use crate::status::{FileEntry, RepositoryStatus};
-use crate::ui::diff_renderer::DiffRenderer;
-use crate::ui::navigation::{FileDiffKey, NavigationState, SelectionCursor, StatusSection};
+use crate::ui::diff_renderer::{DiffRenderer, SearchHighlight};
+use crate::ui::diff_search::{DiffSearchMode, DiffSearchState};
+use crate::ui::navigation::{
+    FileDiffKey, InlineDiffState, NavigationState, SelectionCursor, StatusSection,
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Margin, Rect},
@@ -10,6 +13,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
+use std::collections::HashMap;
 
 const ICON_COLLAPSED: &str = "▸";
 const ICON_EXPANDED: &str = "▾";
@@ -324,7 +328,8 @@ impl<'a> StatusView<'a> {
                 {
                     if let Some(diff) = &diff_state.diff {
                         self.add_inline_diff_items_with_selection(
-                            items, diff, render_ctx, section, file_index, cursor, overlays,
+                            items, diff, diff_state, render_ctx, section, file_index, cursor,
+                            overlays,
                         );
                     } else {
                         // Show loading placeholder
@@ -432,7 +437,8 @@ impl<'a> StatusView<'a> {
                 {
                     if let Some(diff) = &diff_state.diff {
                         self.add_inline_diff_items_with_selection(
-                            items, diff, render_ctx, section, file_index, cursor, overlays,
+                            items, diff, diff_state, render_ctx, section, file_index, cursor,
+                            overlays,
                         );
                     } else {
                         // Show loading placeholder
@@ -473,6 +479,7 @@ impl<'a> StatusView<'a> {
         &self,
         items: &mut Vec<ListItem>,
         diff: &Diff,
+        diff_state: &InlineDiffState,
         render_ctx: &mut ListRenderContext,
         section: StatusSection,
         file_index: usize,
@@ -488,6 +495,38 @@ impl<'a> StatusView<'a> {
                     .add_modifier(Modifier::ITALIC),
             ))));
             return;
+        }
+
+        let search_state = &diff_state.search_state;
+        let search_active = !matches!(search_state.mode, DiffSearchMode::Inactive);
+        let is_search_context = matches!(
+            cursor,
+            Some(SelectionCursor::File { section: s, file_index: fi, .. })
+                | Some(SelectionCursor::Hunk {
+                    section: s,
+                    file_index: fi,
+                    ..
+                }) if s == section && fi == file_index
+        );
+        let mut matches_by_line: HashMap<(usize, usize), Vec<SearchHighlight>> = HashMap::new();
+        let mut matches_by_hunk: HashMap<usize, usize> = HashMap::new();
+
+        if search_active {
+            for (idx, m) in search_state.matches.iter().enumerate() {
+                matches_by_line
+                    .entry((m.hunk_index, m.line_index))
+                    .or_default()
+                    .push(SearchHighlight {
+                        start: m.column,
+                        length: m.length,
+                        is_active: search_state.active_match_index == Some(idx),
+                    });
+                *matches_by_hunk.entry(m.hunk_index).or_insert(0) += 1;
+            }
+
+            for highlights in matches_by_line.values_mut() {
+                highlights.sort_by_key(|h| h.start);
+            }
         }
 
         let renderer = DiffRenderer::new(self.config);
@@ -522,10 +561,23 @@ impl<'a> StatusView<'a> {
             } else {
                 ICON_EXPANDED
             };
-            items.push(ListItem::new(Line::from(Span::styled(
+            let mut header_spans = vec![Span::styled(
                 format!("    {} {}", collapse_indicator, hunk.header.raw),
                 header_style,
-            ))));
+            )];
+
+            if is_collapsed
+                && search_active
+                && let Some(count) = matches_by_hunk.get(&idx).copied().filter(|c| *c > 0)
+            {
+                header_spans.push(Span::raw(" "));
+                header_spans.push(Span::styled(
+                    format!("(+{} matches)", count),
+                    Style::default().fg(self.config.theme.search_match_active),
+                ));
+            }
+
+            items.push(ListItem::new(Line::from(header_spans)));
 
             // Only show diff lines if not collapsed
             if !is_collapsed {
@@ -533,13 +585,22 @@ impl<'a> StatusView<'a> {
                 let mut highlighter = render_context.create_fresh_highlighter();
 
                 // Diff lines with deeper indentation - uses DiffRenderer with automatic syntax highlighting
-                for line in &hunk.lines {
+                for (line_index, line) in hunk.lines.iter().enumerate() {
+                    let highlights = matches_by_line.get(&(idx, line_index));
+                    let has_active_match = highlights
+                        .map(|list| list.iter().any(|h| h.is_active))
+                        .unwrap_or(false);
+
                     let formatted_line = render_context.format_diff_line(
                         line,
                         is_selected,
                         Some("      "),
                         highlighter.as_mut(),
+                        highlights.map(|h| h.as_slice()),
                     );
+                    if search_active && is_search_context && has_active_match {
+                        render_ctx.ensure_visible(items.len());
+                    }
                     items.push(ListItem::new(formatted_line));
                 }
             }
@@ -558,10 +619,93 @@ impl<'a> StatusView<'a> {
                 selected: is_selected,
             });
         }
+
+        if search_active && is_search_context {
+            self.push_search_prompt(items, search_state);
+        }
     }
 }
 
 impl<'a> StatusView<'a> {
+    fn push_search_prompt(&self, items: &mut Vec<ListItem>, search_state: &DiffSearchState) {
+        if matches!(search_state.mode, DiffSearchMode::Inactive) {
+            return;
+        }
+
+        let total = search_state.matches.len();
+        let current = search_state
+            .active_match_index
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+
+        let mut spans = Vec::new();
+        spans.push(Span::raw("    "));
+        spans.push(Span::styled(
+            "Search: ",
+            Style::default().fg(self.config.theme.diff_line_number),
+        ));
+
+        if search_state.query.is_empty() {
+            spans.push(Span::styled(
+                "<empty>",
+                Style::default()
+                    .fg(self.config.theme.diff_no_newline)
+                    .add_modifier(Modifier::ITALIC),
+            ));
+        } else {
+            spans.push(Span::styled(
+                search_state.query.clone(),
+                Style::default().fg(self.config.theme.search_match_active),
+            ));
+        }
+
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("({}/{})", current, total),
+            Style::default().fg(self.config.theme.search_match_active),
+        ));
+
+        spans.push(Span::raw("  "));
+        spans.push(self.search_flag_span("[Aa]", !search_state.flags.case_sensitive));
+        spans.push(Span::raw(" "));
+        spans.push(self.search_flag_span("[W]", search_state.flags.whole_word));
+        spans.push(Span::raw(" "));
+        spans.push(self.search_flag_span("[.*]", search_state.flags.regex));
+
+        if let Some(error) = &search_state.error {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                error.clone(),
+                Style::default()
+                    .fg(self.config.theme.unstaged)
+                    .add_modifier(Modifier::ITALIC),
+            ));
+        } else if matches!(search_state.mode, DiffSearchMode::Editing) {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                "editing",
+                Style::default()
+                    .fg(self.config.theme.untracked)
+                    .add_modifier(Modifier::ITALIC),
+            ));
+        }
+
+        items.push(ListItem::new(Line::from(spans)));
+    }
+
+    fn search_flag_span(&self, label: &str, enabled: bool) -> Span<'static> {
+        let mut style = Style::default().fg(self.config.theme.diff_line_number);
+        if enabled {
+            style = style
+                .fg(self.config.theme.search_match)
+                .add_modifier(Modifier::BOLD);
+        } else {
+            style = style.add_modifier(Modifier::DIM);
+        }
+
+        Span::styled(label.to_string(), style)
+    }
+
     fn inline_diff_indicator(&self, key: &FileDiffKey, is_selected: bool) -> (&'static str, Style) {
         let expanded = self.navigation.is_file_diff_expanded(key);
         let mut icon_style = if expanded {

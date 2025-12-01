@@ -143,7 +143,7 @@ fn test_formatted_line_has_syntax_colors() {
 
     // Format the first content line: "fn main() {"
     let line = &diff.hunks[0].lines[0];
-    let formatted = context.format_diff_line(line, true, None, highlighter.as_mut());
+    let formatted = context.format_diff_line(line, true, None, highlighter.as_mut(), None);
 
     println!("Original: '{}'", line.content);
     println!("Formatted into {} spans:", formatted.spans.len());
@@ -206,7 +206,7 @@ fn test_addition_line_has_syntax_colors() {
     let line = &diff.hunks[0].lines[1];
     assert_eq!(line.line_type, LineType::Addition);
 
-    let formatted = context.format_diff_line(line, true, None, highlighter.as_mut());
+    let formatted = context.format_diff_line(line, true, None, highlighter.as_mut(), None);
 
     println!("Original: '{}'", line.content);
     println!("Line type: Addition (+)");
