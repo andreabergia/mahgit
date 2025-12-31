@@ -111,6 +111,9 @@ impl Repository {
                     path
                 )));
             }
+        } else if absolute_file_path.is_dir() {
+            // If it's a directory, recursively add all files within it
+            self.add_directory_to_index(&absolute_file_path, workdir, &mut index)?;
         } else {
             // File exists, add it normally
             index
@@ -121,6 +124,36 @@ impl Repository {
         index
             .write()
             .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+        Ok(())
+    }
+
+    fn add_directory_to_index(
+        &self,
+        dir_path: &std::path::Path,
+        workdir: &std::path::Path,
+        index: &mut git2::Index,
+    ) -> Result<(), RepositoryError> {
+        // Walk through all entries in the directory recursively
+        let walker = walkdir::WalkDir::new(dir_path)
+            .into_iter()
+            .filter_map(|entry| entry.ok());
+
+        for entry in walker {
+            if entry.file_type().is_file() {
+                // Get the relative path from the working directory
+                let relative_path = entry.path().strip_prefix(workdir).map_err(|e| {
+                    RepositoryError::Other(format!(
+                        "Failed to compute relative path: {}",
+                        e
+                    ))
+                })?;
+
+                index
+                    .add_path(relative_path)
+                    .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+            }
+        }
+
         Ok(())
     }
 
