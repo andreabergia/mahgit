@@ -142,10 +142,7 @@ impl Repository {
             if entry.file_type().is_file() {
                 // Get the relative path from the working directory
                 let relative_path = entry.path().strip_prefix(workdir).map_err(|e| {
-                    RepositoryError::Other(format!(
-                        "Failed to compute relative path: {}",
-                        e
-                    ))
+                    RepositoryError::Other(format!("Failed to compute relative path: {}", e))
                 })?;
 
                 index

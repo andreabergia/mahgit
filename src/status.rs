@@ -1,6 +1,7 @@
 use crate::repository::{Repository, RepositoryError};
 use git2::Status;
 use std::fmt;
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileStatus {
@@ -47,6 +48,37 @@ impl FileEntry {
             old_path: Some(old_path),
         }
     }
+}
+
+// Helper function to expand directories to individual files
+fn expand_untracked_directories(untracked: Vec<String>, repo_path: &Path) -> Vec<String> {
+    let mut expanded = Vec::new();
+
+    for path_str in untracked {
+        let path = repo_path.join(&path_str);
+
+        if path.is_dir() {
+            // If it's a directory, walk through all files in it
+            if let Ok(entries) = walkdir::WalkDir::new(&path)
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()
+            {
+                for entry in entries {
+                    if entry.file_type().is_file()
+                        && let Ok(relative_path) = entry.path().strip_prefix(repo_path)
+                        && let Some(path_str) = relative_path.to_str()
+                    {
+                        expanded.push(path_str.replace('\\', "/")); // Normalize path separators
+                    }
+                }
+            }
+        } else {
+            // If it's a file, just add it as is
+            expanded.push(path_str);
+        }
+    }
+
+    expanded
 }
 
 #[derive(Debug, Default)]
@@ -141,6 +173,12 @@ impl RepositoryStatus {
                 }
             }
         }
+
+        // Expand any directories in untracked files to show individual files
+        let repo_path = repository.git2_repo().workdir().ok_or_else(|| {
+            RepositoryError::Other("Repository has no working directory".to_string())
+        })?;
+        untracked = expand_untracked_directories(untracked, repo_path);
 
         Ok(RepositoryStatus {
             branch_name,
@@ -290,8 +328,51 @@ mod tests {
         assert_eq!(FileStatus::Typechange.to_string(), "typechange");
     }
 
-    // Note: The reload() method is tested in integration tests where we can
-    // create actual git repositories and verify that reload() properly refreshes
-    // the status from the actual repository state. Unit testing reload() would
-    // just duplicate the implementation logic without adding value.
+    // Test the directory expansion functionality
+    #[test]
+    fn test_expand_untracked_directories() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory structure for testing
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let repo_path = temp_dir.path();
+
+        // Create a subdirectory with some files
+        let subdir = repo_path.join("new_dir");
+        fs::create_dir(&subdir).expect("Failed to create subdirectory");
+
+        let file1 = subdir.join("file1.txt");
+        let file2 = subdir.join("file2.txt");
+        fs::write(&file1, "content1").expect("Failed to write file1");
+        fs::write(&file2, "content2").expect("Failed to write file2");
+
+        // Create another nested directory with a file
+        let nested_dir = subdir.join("nested");
+        fs::create_dir(&nested_dir).expect("Failed to create nested directory");
+        let nested_file = nested_dir.join("nested_file.txt");
+        fs::write(&nested_file, "nested content").expect("Failed to write nested file");
+
+        // Test the helper function directly
+        let untracked_paths = vec!["new_dir".to_string()];
+        let expanded = super::expand_untracked_directories(untracked_paths, repo_path);
+
+        // Should expand to all individual files
+        assert!(expanded.contains(&"new_dir/file1.txt".to_string()));
+        assert!(expanded.contains(&"new_dir/file2.txt".to_string()));
+        assert!(expanded.contains(&"new_dir/nested/nested_file.txt".to_string()));
+        assert_eq!(expanded.len(), 3); // Three files total
+
+        // Test with mixed files and directories
+        let untracked_paths = vec!["new_dir".to_string(), "standalone.txt".to_string()];
+        fs::write(repo_path.join("standalone.txt"), "standalone")
+            .expect("Failed to write standalone file");
+        let expanded = super::expand_untracked_directories(untracked_paths, repo_path);
+
+        assert!(expanded.contains(&"new_dir/file1.txt".to_string()));
+        assert!(expanded.contains(&"new_dir/file2.txt".to_string()));
+        assert!(expanded.contains(&"new_dir/nested/nested_file.txt".to_string()));
+        assert!(expanded.contains(&"standalone.txt".to_string()));
+        assert_eq!(expanded.len(), 4); // Three files from directory + one standalone file
+    }
 }

@@ -80,13 +80,3 @@ fn test_add_directory_with_special_characters_to_index() {
             .is_some()
     );
 }
-
-
-
-    
-
-       
-
-       
-
-        
