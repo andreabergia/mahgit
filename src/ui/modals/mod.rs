@@ -1,8 +1,10 @@
 pub mod commit;
 pub mod confirm;
+pub mod log;
 
 pub use commit::CommitModal;
 pub use confirm::ConfirmModal;
+pub use log::LogModal;
 
 use crate::config::Config;
 use crate::ui::input::Command;
@@ -20,7 +22,7 @@ pub enum ModalContext {
     None,
     Commit,
     Confirm,
-    // Future: Branch, Push, Pull, Log, etc.
+    Log,
 }
 
 /// Trait for implementing modal dialogs

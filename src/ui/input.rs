@@ -77,6 +77,10 @@ pub enum Command {
     OpenCommitModal,
     Commit(CommitMode),
 
+    // Log operations
+    OpenLogModal,
+    OpenLog,
+
     // Unknown command
     Unknown,
 
@@ -147,7 +151,7 @@ impl InputHandler {
 
     /// Check if a character is a modal prefix key
     fn is_modal_prefix_key(c: char) -> bool {
-        matches!(c, 'c')
+        matches!(c, 'c' | 'l')
     }
 
     pub fn handle_key(&mut self, key_event: KeyEvent) -> InputResult {
@@ -360,6 +364,7 @@ impl InputHandler {
                     "ca" => InputResult::Command(Command::Commit(CommitMode::Amend)),
                     "ce" => InputResult::Command(Command::Commit(CommitMode::Extend)),
                     "cw" => InputResult::Command(Command::Commit(CommitMode::Reword)),
+                    "ll" => InputResult::Command(Command::OpenLog),
                     _ => InputResult::None,
                 };
             } else if elapsed < self.sequence_timeout {
@@ -374,6 +379,7 @@ impl InputHandler {
                         ('c', 'a') => InputResult::Command(Command::Commit(CommitMode::Amend)),
                         ('c', 'e') => InputResult::Command(Command::Commit(CommitMode::Extend)),
                         ('c', 'w') => InputResult::Command(Command::Commit(CommitMode::Reword)),
+                        ('l', 'l') => InputResult::Command(Command::OpenLog),
                         _ => InputResult::None,
                     };
                 }
@@ -383,7 +389,7 @@ impl InputHandler {
         }
 
         // Check if this character is a prefix key for a sequence
-        if matches!(current_char, 'g' | 'c') {
+        if matches!(current_char, 'g' | 'c' | 'l') {
             // Store this key as the potential first key of a sequence
             self.previous_key = Some(PreviousKey {
                 character: current_char,
@@ -432,6 +438,10 @@ impl InputHandler {
             "  ce      Extend last commit (no edit)",
             "  cw      Reword last commit message",
             "  c...    Wait for commit modal",
+            "",
+            "Log:",
+            "  ll      Log current branch",
+            "  l...    Wait for log modal",
             "",
             "Application:",
             "  q       Quit application",

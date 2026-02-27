@@ -23,6 +23,9 @@ pub struct Theme {
     pub diff_inline_deletion: Color,
     pub help_key: Color,
     pub help_desc: Color,
+    pub log_hash: Color,
+    pub log_author: Color,
+    pub log_date: Color,
 }
 
 impl Default for Theme {
@@ -67,6 +70,9 @@ impl Theme {
             diff_inline_deletion: Color::Rgb(81, 38, 33), // muted red block highlight
             help_key: Color::Rgb(127, 219, 202),        // #7FDBCA
             help_desc: Color::Rgb(201, 209, 217),       // #C9D1D9
+            log_hash: Color::Rgb(224, 175, 104),        // #E0AF68 - gold
+            log_author: Color::Rgb(127, 219, 202),      // #7FDBCA - teal
+            log_date: Color::Rgb(110, 118, 129),        // #6E7681 - dimmed
         }
     }
 }
