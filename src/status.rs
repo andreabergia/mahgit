@@ -58,19 +58,22 @@ fn expand_untracked_directories(untracked: Vec<String>, repo_path: &Path) -> Vec
         let path = repo_path.join(&path_str);
 
         if path.is_dir() {
-            // If it's a directory, walk through all files in it
-            if let Ok(entries) = walkdir::WalkDir::new(&path)
+            let mut found_files = false;
+            for entry in walkdir::WalkDir::new(&path)
                 .into_iter()
-                .collect::<Result<Vec<_>, _>>()
+                .filter_map(|e| e.ok())
             {
-                for entry in entries {
-                    if entry.file_type().is_file()
-                        && let Ok(relative_path) = entry.path().strip_prefix(repo_path)
-                        && let Some(path_str) = relative_path.to_str()
-                    {
-                        expanded.push(path_str.replace('\\', "/")); // Normalize path separators
-                    }
+                if entry.file_type().is_file()
+                    && let Ok(relative_path) = entry.path().strip_prefix(repo_path)
+                    && let Some(path_str) = relative_path.to_str()
+                {
+                    expanded.push(path_str.replace('\\', "/")); // Normalize path separators
+                    found_files = true;
                 }
+            }
+            // Fallback: keep the directory entry if we couldn't find any files
+            if !found_files {
+                expanded.push(path_str);
             }
         } else {
             // If it's a file, just add it as is
@@ -78,6 +81,7 @@ fn expand_untracked_directories(untracked: Vec<String>, repo_path: &Path) -> Vec
         }
     }
 
+    expanded.sort();
     expanded
 }
 
