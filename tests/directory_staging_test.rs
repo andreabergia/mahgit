@@ -80,3 +80,46 @@ fn test_add_directory_with_special_characters_to_index() {
             .is_some()
     );
 }
+#[test]
+fn test_add_repo_root_with_dot_path_to_index() {
+    let test_repo = create_test_repository().expect("Failed to create test repository");
+    let repo = &test_repo.repository;
+    let repo_path = test_repo.temp_dir.path();
+
+    fs::create_dir_all(repo_path.join("root_dir")).expect("Failed to create root_dir");
+    fs::write(repo_path.join("root_dir/new.txt"), "content").expect("Failed to write new file");
+
+    let result = repo.add_to_index(".");
+    assert!(
+        result.is_ok(),
+        "Failed to add repository root using '.': {:?}",
+        result.err()
+    );
+
+    let index = repo.get_index().expect("Failed to get index");
+    assert!(index.get_path(Path::new("root_dir/new.txt"), 0).is_some());
+}
+
+#[test]
+fn test_add_repo_root_with_dot_slash_path_to_index() {
+    let test_repo = create_test_repository().expect("Failed to create test repository");
+    let repo = &test_repo.repository;
+    let repo_path = test_repo.temp_dir.path();
+
+    fs::create_dir_all(repo_path.join("another_dir")).expect("Failed to create another_dir");
+    fs::write(repo_path.join("another_dir/new.txt"), "content").expect("Failed to write new file");
+
+    let result = repo.add_to_index("./");
+    assert!(
+        result.is_ok(),
+        "Failed to add repository root using './': {:?}",
+        result.err()
+    );
+
+    let index = repo.get_index().expect("Failed to get index");
+    assert!(
+        index
+            .get_path(Path::new("another_dir/new.txt"), 0)
+            .is_some()
+    );
+}

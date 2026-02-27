@@ -1,5 +1,5 @@
 use git2::Repository as Git2Repository;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug)]
 pub enum RepositoryError {
@@ -89,23 +89,30 @@ impl Repository {
 
     pub fn add_to_index(&self, path: &str) -> Result<(), RepositoryError> {
         let mut index = self.get_index()?;
+        let normalized_path = Self::normalize_repo_relative_path_allow_empty(path)?;
 
         // Check if the file exists in the working directory relative to the repo root
         let workdir = self.git_repo.workdir().ok_or_else(|| {
             RepositoryError::Other("Repository has no working directory".to_string())
         })?;
-        let file_path = std::path::Path::new(path);
-        let absolute_file_path = workdir.join(file_path);
+        let absolute_file_path = workdir.join(&normalized_path);
 
         if !absolute_file_path.exists() {
-            // If the file doesn't exist, check if it exists in the index
-            // If it does, this is a deletion and we need to remove it from the index
-            if index.get_path(file_path, 0).is_some() {
+            // File is missing in working directory. Handle tracked files as deletions.
+            let is_in_index = index.get_path(&normalized_path, 0).is_some();
+            let is_tracked_in_head = self.is_tracked_path(&normalized_path)?;
+
+            if is_in_index {
+                // Remove it from the index to stage the deletion
                 index
-                    .remove_path(file_path)
+                    .remove_path(&normalized_path)
                     .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+            } else if is_tracked_in_head {
+                // For deleted tracked directories, remove nested entries from index.
+                // If nothing matches, deletion was already staged.
+                self.remove_path_prefix_from_index(&mut index, &normalized_path)?;
             } else {
-                // File doesn't exist in working directory or index
+                // File doesn't exist in working directory and was never tracked
                 return Err(RepositoryError::Other(format!(
                     "File '{}' does not exist and is not tracked",
                     path
@@ -117,7 +124,7 @@ impl Repository {
         } else {
             // File exists, add it normally
             index
-                .add_path(file_path)
+                .add_path(&normalized_path)
                 .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
         }
 
@@ -134,8 +141,12 @@ impl Repository {
         index: &mut git2::Index,
     ) -> Result<(), RepositoryError> {
         // Walk through all entries in the directory recursively
+        let git_dir = workdir.join(".git");
         let walker = walkdir::WalkDir::new(dir_path)
             .into_iter()
+            .filter_entry(|entry| {
+                entry.path() != git_dir.as_path() && !entry.path().starts_with(&git_dir)
+            })
             .filter_map(|entry| entry.ok());
 
         for entry in walker {
@@ -149,6 +160,34 @@ impl Repository {
                     .add_path(relative_path)
                     .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
             }
+        }
+
+        Ok(())
+    }
+
+    fn remove_path_prefix_from_index(
+        &self,
+        index: &mut git2::Index,
+        path: &Path,
+    ) -> Result<(), RepositoryError> {
+        let path_str = path.to_string_lossy();
+        let dir_prefix = format!("{}/", path_str);
+        let paths_to_remove: Vec<PathBuf> = index
+            .iter()
+            .filter_map(|entry| {
+                let entry_path = String::from_utf8_lossy(&entry.path);
+                if entry_path == path_str || entry_path.starts_with(&dir_prefix) {
+                    Some(PathBuf::from(entry_path.as_ref()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for entry_path in paths_to_remove {
+            index
+                .remove_path(&entry_path)
+                .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
         }
 
         Ok(())
@@ -178,6 +217,11 @@ impl Repository {
 
     /// Check if a file is tracked in the repository (exists in HEAD)
     pub fn is_tracked(&self, path: &str) -> Result<bool, RepositoryError> {
+        let normalized_path = Self::normalize_repo_relative_path(path)?;
+        self.is_tracked_path(&normalized_path)
+    }
+
+    fn is_tracked_path(&self, file_path: &Path) -> Result<bool, RepositoryError> {
         // Get HEAD commit
         let head = match self.git_repo.head() {
             Ok(head) => head,
@@ -202,8 +246,53 @@ impl Repository {
             .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
 
         // Check if the path exists in the tree
-        let file_path = std::path::Path::new(path);
         Ok(tree.get_path(file_path).is_ok())
+    }
+
+    fn normalize_repo_relative_path(path: &str) -> Result<PathBuf, RepositoryError> {
+        Self::normalize_repo_relative_path_with_options(path, false)
+    }
+
+    fn normalize_repo_relative_path_allow_empty(path: &str) -> Result<PathBuf, RepositoryError> {
+        Self::normalize_repo_relative_path_with_options(path, true)
+    }
+
+    fn normalize_repo_relative_path_with_options(
+        path: &str,
+        allow_empty: bool,
+    ) -> Result<PathBuf, RepositoryError> {
+        let input = Path::new(path);
+        if input.is_absolute() {
+            return Err(RepositoryError::Other(format!(
+                "Path '{}' must be relative to repository root",
+                path
+            )));
+        }
+
+        let mut normalized = PathBuf::new();
+        for component in input.components() {
+            match component {
+                Component::CurDir => {}
+                Component::Normal(part) => normalized.push(part),
+                Component::ParentDir => {
+                    if !normalized.pop() {
+                        normalized.push(component.as_os_str());
+                    }
+                }
+                Component::RootDir | Component::Prefix(_) => {
+                    return Err(RepositoryError::Other(format!(
+                        "Path '{}' must be relative to repository root",
+                        path
+                    )));
+                }
+            }
+        }
+
+        if normalized.as_os_str().is_empty() && !allow_empty {
+            return Err(RepositoryError::Other("Path cannot be empty".to_string()));
+        }
+
+        Ok(normalized)
     }
 
     /// Discard changes to a file in the working directory
