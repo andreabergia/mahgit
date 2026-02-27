@@ -4,6 +4,8 @@ pub mod diff_view;
 pub mod feedback;
 pub mod inline_diff;
 pub mod input;
+pub mod log_navigation;
+pub mod log_view;
 pub mod modals;
 pub mod navigation;
 pub mod status_view;
@@ -48,11 +50,18 @@ pub struct App {
     pending_operation: Option<PendingOperation>,
     word_wrap: bool,
     ignore_whitespace: bool,
+    /// Current view type
+    current_view: ViewType,
+    /// Log data (loaded when entering log view)
+    log_data: Option<crate::log::LogData>,
+    /// Navigation state for log view
+    log_navigation: Option<log_navigation::LogNavigationState>,
 }
 
 #[derive(Clone, PartialEq)]
 pub enum ViewType {
-    Status, // Remove Diff variant - everything stays in Status view
+    Status,
+    Log,
 }
 
 enum StageAction {
@@ -96,6 +105,9 @@ impl App {
             pending_operation: None,
             word_wrap,
             ignore_whitespace,
+            current_view: ViewType::Status,
+            log_data: None,
+            log_navigation: None,
         }
     }
 
@@ -156,12 +168,11 @@ impl App {
         let result = self.input_handler.handle_key(key_event);
         match result {
             InputResult::Command(command) => self.handle_command(command),
-            InputResult::ShowModal(prefix) => {
-                // Future: support other modals (branch, push, pull, log, etc.)
-                if prefix == 'c' {
-                    self.show_commit_modal();
-                }
-            }
+            InputResult::ShowModal(prefix) => match prefix {
+                'c' => self.show_commit_modal(),
+                'l' => self.show_log_modal(),
+                _ => {}
+            },
             InputResult::Pending => {
                 // Waiting for second key, do nothing
             }
@@ -321,9 +332,10 @@ impl App {
 
             // Check if we should show a modal (timeout reached for prefix key)
             if let Some(prefix) = self.input_handler.should_show_modal() {
-                // Future: support other modals (branch, push, pull, log, etc.)
-                if prefix == 'c' {
-                    self.show_commit_modal();
+                match prefix {
+                    'c' => self.show_commit_modal(),
+                    'l' => self.show_log_modal(),
+                    _ => {}
                 }
                 self.input_handler.clear_prefix_state();
             }
@@ -360,6 +372,13 @@ impl App {
     }
 
     fn handle_command(&mut self, command: Command) {
+        match self.current_view {
+            ViewType::Status => self.handle_status_command(command),
+            ViewType::Log => self.handle_log_command(command),
+        }
+    }
+
+    fn handle_status_command(&mut self, command: Command) {
         match command {
             Command::MoveUp | Command::ScrollDiffUp => self.move_cursor(VerticalDirection::Up),
             Command::MoveDown | Command::ScrollDiffDown => {
@@ -442,12 +461,115 @@ impl App {
             Command::Commit(mode) => {
                 self.handle_commit_command(mode);
             }
-            Command::Unknown => {
-                // Ignore unknown commands
+            Command::OpenLogModal => {
+                self.show_log_modal();
             }
-            Command::None => {
-                // No-op for unhandled events (like unsupported mouse events)
+            Command::OpenLog => {
+                self.open_log_view();
             }
+            Command::Unknown | Command::None => {}
+        }
+    }
+
+    fn handle_log_command(&mut self, command: Command) {
+        match command {
+            Command::MoveUp | Command::ScrollDiffUp => {
+                if let Some(log_nav) = &mut self.log_navigation
+                    && let Some(log_data) = &self.log_data
+                {
+                    log_nav.move_to_previous(log_data);
+                }
+            }
+            Command::MoveDown | Command::ScrollDiffDown => {
+                if let (Some(log_nav), Some(log_data)) = (&mut self.log_navigation, &self.log_data)
+                {
+                    log_nav.move_to_next(log_data);
+                }
+                // Load more if near the bottom (separate borrow scope)
+                let should_load = self
+                    .log_navigation
+                    .as_ref()
+                    .and_then(|nav| nav.current_cursor())
+                    .and_then(|cursor| {
+                        if let log_navigation::LogCursor::Commit { index } = cursor {
+                            self.log_data.as_ref().and_then(|data| {
+                                if index >= data.entries.len().saturating_sub(10) && data.has_more {
+                                    Some(())
+                                } else {
+                                    None
+                                }
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .is_some();
+                if should_load {
+                    self.load_more_log_entries();
+                }
+            }
+            Command::ScrollViewportUp => {
+                if let Some(log_nav) = &self.log_navigation {
+                    log_nav.scroll_viewport_up(1);
+                }
+            }
+            Command::ScrollViewportDown => {
+                if let Some(log_nav) = &self.log_navigation {
+                    log_nav.scroll_viewport_down(1);
+                }
+            }
+            Command::MoveToTop => {
+                if let (Some(log_nav), Some(log_data)) = (&mut self.log_navigation, &self.log_data)
+                {
+                    log_nav.move_to_top(log_data);
+                }
+            }
+            Command::MoveToBottom => {
+                if let (Some(log_nav), Some(log_data)) = (&mut self.log_navigation, &self.log_data)
+                {
+                    log_nav.move_to_bottom(log_data);
+                }
+            }
+            Command::ToggleAccordion => {
+                self.toggle_log_expansion();
+            }
+            Command::MoveDownHierarchy => {
+                self.toggle_log_expansion();
+            }
+            Command::MoveUpHierarchy => {
+                if let Some(log_nav) = &mut self.log_navigation {
+                    log_nav.move_up_hierarchy();
+                }
+            }
+            Command::PageDiffUp | Command::PageForward => {
+                if let (Some(log_nav), Some(log_data)) = (&mut self.log_navigation, &self.log_data)
+                {
+                    log_nav.page_up(log_data);
+                }
+            }
+            Command::PageDiffDown => {
+                if let (Some(log_nav), Some(log_data)) = (&mut self.log_navigation, &self.log_data)
+                {
+                    log_nav.page_down(log_data);
+                }
+            }
+            Command::ShowHelp => {
+                self.show_help = !self.show_help;
+            }
+            Command::CloseHelp => {
+                if self.show_help {
+                    self.show_help = false;
+                } else {
+                    self.close_log_view();
+                }
+            }
+            Command::Quit => {
+                self.close_log_view();
+            }
+            Command::ForceQuit => {
+                self.should_quit = true;
+            }
+            _ => {} // Ignore status-specific commands in log view
         }
     }
 
@@ -980,13 +1102,26 @@ impl App {
     }
 
     pub fn render(&mut self, f: &mut ratatui::Frame) {
-        self.navigation.ensure_cursor_valid(&self.status);
         let area = f.area();
 
-        // 1. Always render the status view (now with inline diffs)
-        let status_view =
-            StatusView::new(&self.status, &self.navigation, &self.config, self.word_wrap);
-        status_view.render(f, area);
+        match self.current_view {
+            ViewType::Status => {
+                self.navigation.ensure_cursor_valid(&self.status);
+                let status_view = StatusView::new(
+                    &self.status,
+                    &self.navigation,
+                    &self.config,
+                    self.word_wrap,
+                );
+                status_view.render(f, area);
+            }
+            ViewType::Log => {
+                if let (Some(log_data), Some(log_nav)) = (&self.log_data, &self.log_navigation) {
+                    let log_view = log_view::LogView::new(log_data, log_nav, &self.config);
+                    log_view.render(f, area);
+                }
+            }
+        }
 
         // 2. Render feedback message if there is one
         if let Some(feedback) = self.feedback_manager.get_current_message() {
@@ -1554,6 +1689,211 @@ impl App {
         let modal = modals::CommitModal::new();
         self.active_modal = Some(Box::new(modal));
         self.modal_context = ModalContext::Commit;
+    }
+
+    /// Show the log modal
+    fn show_log_modal(&mut self) {
+        let modal = modals::LogModal::new();
+        self.active_modal = Some(Box::new(modal));
+        self.modal_context = ModalContext::Log;
+    }
+
+    /// Open the log view
+    fn open_log_view(&mut self) {
+        const INITIAL_BATCH: usize = 50;
+        match self.repository.load_log_entries(INITIAL_BATCH, 0) {
+            Ok((entries, has_more)) => {
+                let branch = self.status.branch_name.clone();
+                let mut log_data = crate::log::LogData::new(branch);
+                log_data.total_loaded = entries.len();
+                log_data.has_more = has_more;
+                log_data.entries = entries;
+
+                self.log_navigation = Some(log_navigation::LogNavigationState::new());
+                self.log_data = Some(log_data);
+                self.current_view = ViewType::Log;
+            }
+            Err(err) => {
+                self.feedback_manager
+                    .show_result(crate::operations::OperationResult::new(format!(
+                        "Failed to load log: {}",
+                        err
+                    )));
+            }
+        }
+    }
+
+    /// Close the log view and return to status
+    fn close_log_view(&mut self) {
+        self.current_view = ViewType::Status;
+        self.log_data = None;
+        self.log_navigation = None;
+    }
+
+    /// Load more log entries
+    fn load_more_log_entries(&mut self) {
+        const BATCH_SIZE: usize = 50;
+        if let Some(log_data) = &mut self.log_data {
+            if !log_data.has_more {
+                return;
+            }
+            let skip = log_data.total_loaded;
+            match self.repository.load_log_entries(BATCH_SIZE, skip) {
+                Ok((entries, has_more)) => {
+                    log_data.total_loaded += entries.len();
+                    log_data.has_more = has_more;
+                    log_data.entries.extend(entries);
+                }
+                Err(_) => {
+                    log_data.has_more = false;
+                }
+            }
+        }
+    }
+
+    /// Toggle expansion of a commit or file in the log view
+    fn toggle_log_expansion(&mut self) {
+        let cursor = self
+            .log_navigation
+            .as_ref()
+            .and_then(|nav| nav.current_cursor());
+        let Some(cursor) = cursor else { return };
+
+        match cursor {
+            log_navigation::LogCursor::Commit { index } => {
+                // Toggle commit expansion - load files if first time
+                let already_expanded = self
+                    .log_navigation
+                    .as_ref()
+                    .is_some_and(|nav| nav.is_commit_expanded(index));
+
+                if already_expanded {
+                    // Collapse
+                    if let Some(nav) = &mut self.log_navigation
+                        && let Some(expansion) = nav.get_expansion_mut(index)
+                    {
+                        expansion.expanded = false;
+                    }
+                } else {
+                    // Expand - load files if needed
+                    let has_expansion = self
+                        .log_navigation
+                        .as_ref()
+                        .and_then(|nav| nav.get_expansion(index))
+                        .is_some();
+
+                    if has_expansion {
+                        if let Some(nav) = &mut self.log_navigation
+                            && let Some(expansion) = nav.get_expansion_mut(index)
+                        {
+                            expansion.expanded = true;
+                        }
+                    } else {
+                        // Load files from repository
+                        let oid = self
+                            .log_data
+                            .as_ref()
+                            .and_then(|d| d.entries.get(index))
+                            .map(|e| e.oid);
+                        if let Some(oid) = oid {
+                            match self.repository.changed_files_for_commit(oid) {
+                                Ok(files) => {
+                                    let expansion = log_navigation::CommitExpansion {
+                                        expanded: true,
+                                        files,
+                                        file_diffs: std::collections::HashMap::new(),
+                                        expanded_files: std::collections::HashSet::new(),
+                                    };
+                                    if let Some(nav) = &mut self.log_navigation {
+                                        nav.set_expansion(index, expansion);
+                                    }
+                                }
+                                Err(err) => {
+                                    self.feedback_manager.show_result(
+                                        crate::operations::OperationResult::new(format!(
+                                            "Failed to load commit files: {}",
+                                            err
+                                        )),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            log_navigation::LogCursor::File {
+                commit_index,
+                file_index,
+            } => {
+                // Toggle file expansion - load diff if first time
+                let already_expanded = self
+                    .log_navigation
+                    .as_ref()
+                    .is_some_and(|nav| nav.is_file_expanded(commit_index, file_index));
+
+                if already_expanded {
+                    if let Some(nav) = &mut self.log_navigation
+                        && let Some(expansion) = nav.get_expansion_mut(commit_index)
+                    {
+                        expansion.expanded_files.remove(&file_index);
+                    }
+                } else {
+                    // Check if diff is already loaded
+                    let has_diff = self
+                        .log_navigation
+                        .as_ref()
+                        .and_then(|nav| nav.get_expansion(commit_index))
+                        .is_some_and(|exp| exp.file_diffs.contains_key(&file_index));
+
+                    if has_diff {
+                        if let Some(nav) = &mut self.log_navigation
+                            && let Some(expansion) = nav.get_expansion_mut(commit_index)
+                        {
+                            expansion.expanded_files.insert(file_index);
+                        }
+                    } else {
+                        // Load diff from repository
+                        let info: Option<(git2::Oid, String)> = self
+                            .log_data
+                            .as_ref()
+                            .and_then(|d| d.entries.get(commit_index))
+                            .and_then(|entry| {
+                                self.log_navigation
+                                    .as_ref()
+                                    .and_then(|nav| nav.get_expansion(commit_index))
+                                    .and_then(|exp| exp.files.get(file_index))
+                                    .map(|f| (entry.oid, f.path.clone()))
+                            });
+
+                        if let Some((oid, file_path)) = info {
+                            let diff_gen =
+                                crate::diff::DiffGenerator::new(self.repository.git2_repo());
+                            match diff_gen.generate_commit_file_diff(oid, &file_path) {
+                                Ok(diff) => {
+                                    if let Some(nav) = &mut self.log_navigation
+                                        && let Some(expansion) = nav.get_expansion_mut(commit_index)
+                                    {
+                                        expansion.file_diffs.insert(file_index, diff);
+                                        expansion.expanded_files.insert(file_index);
+                                    }
+                                }
+                                Err(err) => {
+                                    self.feedback_manager.show_result(
+                                        crate::operations::OperationResult::new(format!(
+                                            "Failed to load diff: {}",
+                                            err
+                                        )),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            log_navigation::LogCursor::Hunk { .. } => {
+                // No expansion at hunk level
+            }
+        }
     }
 
     /// Close the currently active modal
