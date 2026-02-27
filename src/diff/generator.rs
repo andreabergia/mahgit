@@ -364,6 +364,129 @@ impl<'repo> DiffGenerator<'repo> {
         Ok(diff)
     }
 
+    /// Generate a diff for a specific file in a commit (vs its first parent).
+    pub fn generate_commit_file_diff(
+        &self,
+        oid: git2::Oid,
+        file_path: &str,
+    ) -> Result<Diff, DiffError> {
+        let commit = self.repo.find_commit(oid)?;
+        let tree = commit.tree()?;
+
+        let parent_tree = if commit.parent_count() > 0 {
+            Some(commit.parent(0)?.tree()?)
+        } else {
+            None
+        };
+
+        let mut diff_options = DiffOptions::new();
+        diff_options.pathspec(file_path);
+        diff_options.context_lines(3);
+
+        let git_diff = self.repo.diff_tree_to_tree(
+            parent_tree.as_ref(),
+            Some(&tree),
+            Some(&mut diff_options),
+        )?;
+
+        let mut hunks = Vec::new();
+        let mut binary = false;
+        let mut line_count = 0;
+
+        git_diff.print(git2::DiffFormat::Patch, |delta, hunk, line| {
+            if delta.flags().contains(git2::DiffFlags::BINARY) {
+                binary = true;
+                return false;
+            }
+            if let Some(hunk_data) = hunk {
+                let current_header = String::from_utf8_lossy(hunk_data.header()).to_string();
+
+                let is_new_hunk = hunks.is_empty()
+                    || hunks.last().map(|h: &DiffHunk| &h.header.raw) != Some(&current_header);
+
+                if is_new_hunk {
+                    use crate::diff::{HunkHeader, LineRange};
+                    let diff_hunk = DiffHunk {
+                        header: HunkHeader {
+                            raw: current_header.clone(),
+                            old_start: hunk_data.old_start(),
+                            old_lines: hunk_data.old_lines(),
+                            new_start: hunk_data.new_start(),
+                            new_lines: hunk_data.new_lines(),
+                        },
+                        old_range: LineRange {
+                            start: hunk_data.old_start(),
+                            count: hunk_data.old_lines(),
+                        },
+                        new_range: LineRange {
+                            start: hunk_data.new_start(),
+                            count: hunk_data.new_lines(),
+                        },
+                        stageable: false,
+                        context_lines: 3,
+                        lines: Vec::new(),
+                    };
+                    hunks.push(diff_hunk);
+                }
+            }
+
+            match line.origin() {
+                '+' | '-' | ' ' | '\\' => {
+                    line_count += 1;
+                    if line_count > Self::MAX_LINES_PER_DIFF {
+                        return false;
+                    }
+
+                    let line_type = match line.origin() {
+                        '+' => LineType::Addition,
+                        '-' => LineType::Deletion,
+                        ' ' => LineType::Context,
+                        '\\' => LineType::NoNewlineEOF,
+                        _ => unreachable!(),
+                    };
+
+                    let content = String::from_utf8_lossy(line.content()).to_string();
+                    if Self::contains_problematic_chars(&content) {
+                        return false;
+                    }
+
+                    let old_line_no = line.old_lineno().map(|n| n as usize);
+                    let new_line_no = line.new_lineno().map(|n| n as usize);
+
+                    let diff_line = DiffLine {
+                        content,
+                        line_type,
+                        old_line_no,
+                        new_line_no,
+                        inline_diff: None,
+                    };
+
+                    if let Some(last_hunk) = hunks.last_mut() {
+                        last_hunk.lines.push(diff_line);
+                    }
+                }
+                _ => {}
+            }
+
+            true
+        })?;
+
+        if binary {
+            return Err(DiffError::BinaryFile(file_path.to_string()));
+        }
+
+        let mut diff = Diff {
+            file_path: file_path.to_string(),
+            context: DiffContext::IndexToHead, // Closest match for commit diffs
+            hunks,
+            binary,
+        };
+
+        compute_inline_diffs(&mut diff);
+
+        Ok(diff)
+    }
+
     fn generate_deleted_file_diff(
         &self,
         file_path: &str,

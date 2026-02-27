@@ -215,6 +215,129 @@ impl Repository {
         &self.git_repo
     }
 
+    /// Load commits from HEAD, skipping `skip` and returning up to `count`.
+    /// Returns the entries and whether more commits exist.
+    pub fn load_log_entries(
+        &self,
+        count: usize,
+        skip: usize,
+    ) -> Result<(Vec<crate::log::LogEntry>, bool), RepositoryError> {
+        let mut revwalk = self
+            .git_repo
+            .revwalk()
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        revwalk
+            .push_head()
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        revwalk
+            .set_sorting(git2::Sort::TIME)
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        let mut entries = Vec::new();
+        let mut skipped = 0;
+        let mut has_more = false;
+
+        for oid_result in revwalk {
+            let oid = oid_result.map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+
+            if entries.len() >= count {
+                has_more = true;
+                break;
+            }
+
+            let commit = self
+                .git_repo
+                .find_commit(oid)
+                .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+            let author = commit.author();
+            let short_hash = format!("{:.7}", oid);
+            let summary = commit.summary().unwrap_or("").to_string();
+            let author_name = author.name().unwrap_or("Unknown").to_string();
+            let author_email = author.email().unwrap_or("").to_string();
+            let time = author.when();
+
+            entries.push(crate::log::LogEntry {
+                oid,
+                short_hash,
+                summary,
+                author_name,
+                author_email,
+                time,
+            });
+        }
+
+        Ok((entries, has_more))
+    }
+
+    /// Get the list of changed files for a commit (compared to its first parent).
+    pub fn changed_files_for_commit(
+        &self,
+        oid: git2::Oid,
+    ) -> Result<Vec<CommitFileChange>, RepositoryError> {
+        let commit = self
+            .git_repo
+            .find_commit(oid)
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        let tree = commit
+            .tree()
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        let parent_tree = if commit.parent_count() > 0 {
+            Some(
+                commit
+                    .parent(0)
+                    .map_err(|e| RepositoryError::Other(e.message().to_string()))?
+                    .tree()
+                    .map_err(|e| RepositoryError::Other(e.message().to_string()))?,
+            )
+        } else {
+            None
+        };
+
+        let diff = self
+            .git_repo
+            .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
+            .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
+
+        let mut changes = Vec::new();
+        for delta in diff.deltas() {
+            let path = delta
+                .new_file()
+                .path()
+                .and_then(|p| p.to_str())
+                .unwrap_or("<invalid>")
+                .to_string();
+            let old_path = delta
+                .old_file()
+                .path()
+                .and_then(|p| p.to_str())
+                .map(|s| s.to_string());
+            let change_type = match delta.status() {
+                git2::Delta::Added => CommitChangeType::Added,
+                git2::Delta::Deleted => CommitChangeType::Deleted,
+                git2::Delta::Modified => CommitChangeType::Modified,
+                git2::Delta::Renamed => CommitChangeType::Renamed,
+                _ => CommitChangeType::Other,
+            };
+            changes.push(CommitFileChange {
+                path,
+                old_path,
+                change_type,
+            });
+        }
+
+        Ok(changes)
+    }
+
     /// Check if a file is tracked in the repository (exists in HEAD)
     pub fn is_tracked(&self, path: &str) -> Result<bool, RepositoryError> {
         let normalized_path = Self::normalize_repo_relative_path(path)?;
@@ -327,6 +450,34 @@ impl Repository {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CommitFileChange {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub change_type: CommitChangeType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommitChangeType {
+    Added,
+    Deleted,
+    Modified,
+    Renamed,
+    Other,
+}
+
+impl std::fmt::Display for CommitChangeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CommitChangeType::Added => write!(f, "A"),
+            CommitChangeType::Deleted => write!(f, "D"),
+            CommitChangeType::Modified => write!(f, "M"),
+            CommitChangeType::Renamed => write!(f, "R"),
+            CommitChangeType::Other => write!(f, "?"),
+        }
     }
 }
 
