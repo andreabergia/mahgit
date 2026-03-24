@@ -7,7 +7,7 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 
 pub enum DiffViewContent {
@@ -22,12 +22,14 @@ pub struct DiffView {
     current_hunk_index: Option<usize>,
     config: Config,
     hunk_positions: Vec<HunkPosition>,
+    word_wrap: bool,
 }
 
 impl DiffView {
     pub fn new(diff: Diff, config: Config) -> Self {
         let current_hunk_index = if diff.hunks.is_empty() { None } else { Some(0) };
         let hunk_positions = Self::calculate_hunk_positions_static(&diff);
+        let word_wrap = config.word_wrap;
         Self {
             content: DiffViewContent::Success(diff),
             scroll_position: 0,
@@ -35,10 +37,12 @@ impl DiffView {
             current_hunk_index,
             config,
             hunk_positions,
+            word_wrap,
         }
     }
 
     pub fn new_with_error(file_path: String, error: DiffError, config: Config) -> Self {
+        let word_wrap = config.word_wrap;
         Self {
             content: DiffViewContent::Error { file_path, error },
             scroll_position: 0,
@@ -46,6 +50,7 @@ impl DiffView {
             current_hunk_index: None,
             config,
             hunk_positions: Vec::new(),
+            word_wrap,
         }
     }
 
@@ -192,7 +197,10 @@ impl DiffView {
 
         if content_area_for_lines.height > 0 {
             let text = Text::from(visible_lines);
-            let paragraph = Paragraph::new(text);
+            let mut paragraph = Paragraph::new(text);
+            if self.word_wrap {
+                paragraph = paragraph.wrap(Wrap { trim: false });
+            }
             frame.render_widget(paragraph, content_area_for_lines);
         }
 
@@ -588,6 +596,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let diff_view = DiffView::new(diff, config);
         assert_eq!(diff_view.scroll_position, 0);
@@ -600,6 +609,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 2; // Small viewport to enable scrolling
@@ -625,6 +635,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let diff_view = DiffView::new(diff, config);
         match &diff_view.content {
@@ -640,6 +651,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
@@ -663,6 +675,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
@@ -764,6 +777,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
@@ -796,6 +810,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 4;
@@ -819,6 +834,7 @@ mod tests {
             theme: theme.clone(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let single_hunk_view = DiffView::new(single_hunk_diff, config.clone());
         assert_eq!(single_hunk_view.get_hunk_count(), 1);
@@ -846,6 +862,7 @@ mod tests {
             theme: theme.clone(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let diff_view = DiffView::new(diff.clone(), config.clone());
 
@@ -877,6 +894,7 @@ mod tests {
             theme: theme.clone(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let mut diff_view = DiffView::new(diff.clone(), config.clone());
 
@@ -908,6 +926,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 5;
@@ -948,6 +967,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let diff_view = DiffView::new(diff.clone(), config);
 
@@ -1002,6 +1022,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 5;

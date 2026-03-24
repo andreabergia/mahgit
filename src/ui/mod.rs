@@ -46,6 +46,7 @@ pub struct App {
     modal_context: ModalContext,
     /// Pending operation (set when showing modal that requires confirmation or additional input)
     pending_operation: Option<PendingOperation>,
+    word_wrap: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -77,6 +78,7 @@ enum PendingOperation {
 impl App {
     pub fn new(repository: Repository, status: RepositoryStatus, config: Config) -> Self {
         let navigation = NavigationState::new(&status);
+        let word_wrap = config.word_wrap;
         Self {
             should_quit: false,
             repository,
@@ -90,6 +92,7 @@ impl App {
             active_modal: None,
             modal_context: ModalContext::None,
             pending_operation: None,
+            word_wrap,
         }
     }
 
@@ -414,6 +417,9 @@ impl App {
             Command::JumpToNextHunk => self.jump_within_parent(VerticalDirection::Down),
             Command::IncreaseHunkContext => self.increase_hunk_context(),
             Command::DecreaseHunkContext => self.decrease_hunk_context(),
+            Command::ToggleWordWrap => {
+                self.word_wrap = !self.word_wrap;
+            }
             Command::PageForward => self.scroll_full_page(VerticalDirection::Down),
             Command::MoveUpHierarchy => self.move_up_hierarchy(),
             Command::MoveDownHierarchy => self.move_down_hierarchy(),
@@ -960,7 +966,8 @@ impl App {
         let area = f.area();
 
         // 1. Always render the status view (now with inline diffs)
-        let status_view = StatusView::new(&self.status, &self.navigation, &self.config);
+        let status_view =
+            StatusView::new(&self.status, &self.navigation, &self.config, self.word_wrap);
         status_view.render(f, area);
 
         // 2. Render feedback message if there is one
@@ -1476,6 +1483,7 @@ mod tests {
             theme: crate::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         }
     }
 

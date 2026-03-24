@@ -10,6 +10,7 @@ struct ConfigFile {
     theme: String,
     tab_width: usize,
     show_line_numbers: bool,
+    word_wrap: bool,
 }
 
 impl Default for ConfigFile {
@@ -18,6 +19,7 @@ impl Default for ConfigFile {
             theme: "github-dark".to_string(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         }
     }
 }
@@ -29,6 +31,7 @@ pub struct Config {
     pub theme: Theme,
     pub tab_width: usize,
     pub show_line_numbers: bool,
+    pub word_wrap: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -97,6 +100,7 @@ impl Config {
             theme,
             tab_width: config_file.tab_width,
             show_line_numbers: config_file.show_line_numbers,
+            word_wrap: config_file.word_wrap,
         })
     }
 
@@ -197,6 +201,7 @@ mod tests {
             theme: Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         assert_eq!(config.expand_tabs("\thello"), "    hello");
 
@@ -204,6 +209,7 @@ mod tests {
             theme: Theme::default(),
             tab_width: 8,
             show_line_numbers: true,
+            word_wrap: false,
         };
         assert_eq!(config_width_8.expand_tabs("\thello"), "        hello");
     }

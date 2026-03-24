@@ -62,6 +62,7 @@ fn test_syntax_highlighting_produces_multiple_colors() {
         theme: mahgit::theme::Theme::default(),
         tab_width: 4,
         show_line_numbers: false,
+        word_wrap: false,
     };
 
     let renderer = DiffRenderer::new(&config);
@@ -198,6 +199,7 @@ fn test_context_lines_have_syntax_highlighting() {
         theme: mahgit::theme::Theme::default(),
         tab_width: 4,
         show_line_numbers: false,
+        word_wrap: false,
     };
 
     let renderer = DiffRenderer::new(&config);
@@ -257,6 +259,7 @@ fn test_inactive_context_lines_still_have_syntax_colors() {
         theme: mahgit::theme::Theme::default(),
         tab_width: 4,
         show_line_numbers: false,
+        word_wrap: false,
     };
 
     let renderer = DiffRenderer::new(&config);

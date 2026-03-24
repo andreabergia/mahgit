@@ -10,6 +10,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
+use std::cell::Cell;
 
 const ICON_COLLAPSED: &str = "▸";
 const ICON_EXPANDED: &str = "▾";
@@ -58,6 +59,8 @@ pub struct StatusView<'a> {
     status: &'a RepositoryStatus,
     navigation: &'a NavigationState,
     config: &'a Config,
+    word_wrap: bool,
+    render_width: Cell<u16>,
 }
 
 impl<'a> StatusView<'a> {
@@ -65,11 +68,14 @@ impl<'a> StatusView<'a> {
         status: &'a RepositoryStatus,
         navigation: &'a NavigationState,
         config: &'a Config,
+        word_wrap: bool,
     ) -> Self {
         Self {
             status,
             navigation,
             config,
+            word_wrap,
+            render_width: Cell::new(0),
         }
     }
 
@@ -113,6 +119,7 @@ impl<'a> StatusView<'a> {
 
     fn render_file_sections(&self, f: &mut Frame, area: Rect) {
         let list_area = area;
+        self.render_width.set(area.width);
 
         let mut items = Vec::new();
         let mut selected_list_index = None;
@@ -540,7 +547,14 @@ impl<'a> StatusView<'a> {
                         Some("      "),
                         highlighter.as_mut(),
                     );
-                    items.push(ListItem::new(formatted_line));
+                    if self.word_wrap && self.render_width.get() > 0 {
+                        let wrapped = wrap_line(formatted_line, self.render_width.get());
+                        for wrapped_line in wrapped {
+                            items.push(ListItem::new(wrapped_line));
+                        }
+                    } else {
+                        items.push(ListItem::new(formatted_line));
+                    }
                 }
             }
 
@@ -622,4 +636,81 @@ fn section_label(section: StatusSection) -> String {
         StatusSection::Untracked => "Untracked files".to_string(),
         StatusSection::Conflicted => "Conflicted files".to_string(),
     }
+}
+
+/// Wrap a styled Line into multiple lines that fit within `max_width` columns.
+fn wrap_line(line: Line<'static>, max_width: u16) -> Vec<Line<'static>> {
+    let max_width = max_width as usize;
+    if max_width == 0 {
+        return vec![line];
+    }
+
+    // Calculate total display width
+    let total_width: usize = line.spans.iter().map(|s| display_width(&s.content)).sum();
+    if total_width <= max_width {
+        return vec![line];
+    }
+
+    // Flatten all spans into a list of (char, Style) pairs, then re-chunk by width
+    let mut chars_with_style: Vec<(char, Style)> = Vec::new();
+    for span in &line.spans {
+        for c in span.content.chars() {
+            chars_with_style.push((c, span.style));
+        }
+    }
+
+    let continuation = "        "; // 8 spaces for continuation indent
+    let cont_width = continuation.len();
+    let mut result: Vec<Line<'static>> = Vec::new();
+    let mut pos = 0;
+    let mut is_first_line = true;
+
+    while pos < chars_with_style.len() {
+        let line_max = if is_first_line {
+            max_width
+        } else {
+            max_width.saturating_sub(cont_width)
+        };
+
+        // Take up to line_max chars
+        let end = (pos + line_max).min(chars_with_style.len());
+        let chunk = &chars_with_style[pos..end];
+
+        // Build spans from the chunk, merging consecutive chars with same style
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        if !is_first_line {
+            spans.push(Span::raw(continuation.to_string()));
+        }
+
+        let mut current_text = String::new();
+        let mut current_style = chunk[0].1;
+        for &(c, style) in chunk {
+            if style == current_style {
+                current_text.push(c);
+            } else {
+                spans.push(Span::styled(current_text, current_style));
+                current_text = String::new();
+                current_text.push(c);
+                current_style = style;
+            }
+        }
+        if !current_text.is_empty() {
+            spans.push(Span::styled(current_text, current_style));
+        }
+
+        result.push(Line::from(spans));
+        pos = end;
+        is_first_line = false;
+    }
+
+    if result.is_empty() {
+        vec![Line::from("")]
+    } else {
+        result
+    }
+}
+
+/// Calculate display width of a string (ASCII chars = 1 column each).
+fn display_width(s: &str) -> usize {
+    s.chars().count()
 }

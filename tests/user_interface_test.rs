@@ -39,6 +39,7 @@ fn test_help_window() {
         theme: mahgit::theme::Theme::default(),
         tab_width: 4,
         show_line_numbers: true,
+        word_wrap: false,
     };
     let mut app = App::new(repository, status, config);
 
@@ -69,6 +70,7 @@ fn test_help_window_esc_behavior() {
         theme: mahgit::theme::Theme::default(),
         tab_width: 4,
         show_line_numbers: true,
+        word_wrap: false,
     };
     let mut app = App::new(repository, status, config);
 

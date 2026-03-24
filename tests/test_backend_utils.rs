@@ -26,6 +26,7 @@ impl TestApp {
             theme: mahgit::theme::Theme::default(),
             tab_width: 4,
             show_line_numbers: true,
+            word_wrap: false,
         };
         let app = App::new(repository, status, config);
 

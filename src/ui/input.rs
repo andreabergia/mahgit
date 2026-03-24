@@ -69,6 +69,9 @@ pub enum Command {
     IncreaseHunkContext,
     DecreaseHunkContext,
 
+    // Display toggles
+    ToggleWordWrap,
+
     // Commit operations
     OpenCommitModal,
     Commit(CommitMode),
@@ -252,6 +255,14 @@ impl InputHandler {
                 self.clear_sequence_state();
                 InputResult::Command(Command::MoveToBottom)
             }
+            KeyEvent {
+                code: KeyCode::Char('W'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => {
+                self.clear_sequence_state();
+                InputResult::Command(Command::ToggleWordWrap)
+            }
             // Handle space key
             KeyEvent {
                 code: KeyCode::Char(' '),
@@ -404,6 +415,7 @@ impl InputHandler {
             "  p       Jump to start of current file/section",
             "  =       Expand context in current hunk",
             "  -       Reduce context in current hunk",
+            "  W       Toggle word wrap in diffs",
             "",
             "File Operations:",
             "  s       Stage file or current diff hunk",

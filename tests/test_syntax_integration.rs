@@ -48,6 +48,7 @@ fn test_syntax_highlighting_applied_to_rust_file() {
         theme: Theme::default(),
         tab_width: 4,
         show_line_numbers: false,
+        word_wrap: false,
     };
     let renderer = DiffRenderer::new(&config);
 
