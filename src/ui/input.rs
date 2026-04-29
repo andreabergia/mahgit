@@ -71,6 +71,7 @@ pub enum Command {
 
     // Display toggles
     ToggleWordWrap,
+    ToggleIgnoreWhitespace,
 
     // Commit operations
     OpenCommitModal,
@@ -299,6 +300,7 @@ impl InputHandler {
                     'b' => Command::PageDiffUp,
                     'n' => Command::JumpToNextHunk,
                     'p' => Command::JumpToPreviousHunk,
+                    'w' => Command::ToggleIgnoreWhitespace,
                     '?' => Command::ShowHelp,
                     '=' => Command::IncreaseHunkContext,
                     '-' => Command::DecreaseHunkContext,
@@ -415,6 +417,7 @@ impl InputHandler {
             "  p       Jump to start of current file/section",
             "  =       Expand context in current hunk",
             "  -       Reduce context in current hunk",
+            "  w       Toggle ignoring whitespace changes in diffs",
             "  W       Toggle word wrap in diffs",
             "",
             "File Operations:",
@@ -662,6 +665,36 @@ mod tests {
         assert_eq!(
             handler.handle_key(shift_u),
             InputResult::Command(Command::Unknown)
+        );
+    }
+
+    #[test]
+    fn test_lowercase_w_toggles_ignore_whitespace() {
+        let mut handler = InputHandler::new();
+        let w_key = KeyEvent {
+            code: KeyCode::Char('w'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(
+            handler.handle_key(w_key),
+            InputResult::Command(Command::ToggleIgnoreWhitespace)
+        );
+    }
+
+    #[test]
+    fn test_uppercase_w_still_toggles_word_wrap() {
+        let mut handler = InputHandler::new();
+        let shift_w = KeyEvent {
+            code: KeyCode::Char('W'),
+            modifiers: KeyModifiers::SHIFT,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert_eq!(
+            handler.handle_key(shift_w),
+            InputResult::Command(Command::ToggleWordWrap)
         );
     }
 

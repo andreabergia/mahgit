@@ -63,6 +63,7 @@ fn test_syntax_highlighting_produces_multiple_colors() {
         tab_width: 4,
         show_line_numbers: false,
         word_wrap: false,
+        ignore_whitespace: false,
     };
 
     let renderer = DiffRenderer::new(&config);
@@ -200,6 +201,7 @@ fn test_context_lines_have_syntax_highlighting() {
         tab_width: 4,
         show_line_numbers: false,
         word_wrap: false,
+        ignore_whitespace: false,
     };
 
     let renderer = DiffRenderer::new(&config);
@@ -260,6 +262,7 @@ fn test_inactive_context_lines_still_have_syntax_colors() {
         tab_width: 4,
         show_line_numbers: false,
         word_wrap: false,
+        ignore_whitespace: false,
     };
 
     let renderer = DiffRenderer::new(&config);

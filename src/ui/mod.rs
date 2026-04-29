@@ -47,6 +47,7 @@ pub struct App {
     /// Pending operation (set when showing modal that requires confirmation or additional input)
     pending_operation: Option<PendingOperation>,
     word_wrap: bool,
+    ignore_whitespace: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -79,6 +80,7 @@ impl App {
     pub fn new(repository: Repository, status: RepositoryStatus, config: Config) -> Self {
         let navigation = NavigationState::new(&status);
         let word_wrap = config.word_wrap;
+        let ignore_whitespace = config.ignore_whitespace;
         Self {
             should_quit: false,
             repository,
@@ -93,6 +95,7 @@ impl App {
             modal_context: ModalContext::None,
             pending_operation: None,
             word_wrap,
+            ignore_whitespace,
         }
     }
 
@@ -420,6 +423,10 @@ impl App {
             Command::ToggleWordWrap => {
                 self.word_wrap = !self.word_wrap;
             }
+            Command::ToggleIgnoreWhitespace => {
+                self.ignore_whitespace = !self.ignore_whitespace;
+                self.regenerate_cached_diffs_for_whitespace_toggle();
+            }
             Command::PageForward => self.scroll_full_page(VerticalDirection::Down),
             Command::MoveUpHierarchy => self.move_up_hierarchy(),
             Command::MoveDownHierarchy => self.move_down_hierarchy(),
@@ -638,9 +645,12 @@ impl App {
                         // Refresh the diff
                         let diff_generator =
                             crate::diff::DiffGenerator::new(self.repository.git2_repo());
-                        if let Ok(new_diff) =
-                            diff_generator.generate_diff(&diff_key.path, prev_ctx.clone())
-                        {
+                        if let Ok(new_diff) = diff_generator.generate_diff_with_context(
+                            &diff_key.path,
+                            prev_ctx.clone(),
+                            None,
+                            self.ignore_whitespace,
+                        ) {
                             self.navigation
                                 .set_file_diff(diff_key.clone(), new_diff, prev_ctx);
 
@@ -741,7 +751,12 @@ impl App {
                 self.navigation.reset_inline_diff_selection(&diff_key);
             } else {
                 let diff_generator = DiffGenerator::new(self.repository.git2_repo());
-                match diff_generator.generate_diff(&selected_file.path, diff_context.clone()) {
+                match diff_generator.generate_diff_with_context(
+                    &selected_file.path,
+                    diff_context.clone(),
+                    None,
+                    self.ignore_whitespace,
+                ) {
                     Ok(diff) => {
                         self.navigation
                             .toggle_file_diff_expanded(diff_key.clone(), diff_context.clone());
@@ -903,9 +918,12 @@ impl App {
 
                     let diff_generator =
                         crate::diff::DiffGenerator::new(self.repository.git2_repo());
-                    if let Ok(new_diff) =
-                        diff_generator.generate_diff(&diff_key_clone.path, prev_ctx.clone())
-                    {
+                    if let Ok(new_diff) = diff_generator.generate_diff_with_context(
+                        &diff_key_clone.path,
+                        prev_ctx.clone(),
+                        None,
+                        self.ignore_whitespace,
+                    ) {
                         self.navigation
                             .set_file_diff(diff_key_clone.clone(), new_diff, prev_ctx);
 
@@ -1324,6 +1342,7 @@ impl App {
             file_path,
             diff_context.clone(),
             Some(context_lines as u32),
+            self.ignore_whitespace,
         );
 
         match result {
@@ -1344,6 +1363,98 @@ impl App {
                         err
                     )));
             }
+        }
+    }
+
+    /// Regenerate every cached file diff with the current `ignore_whitespace`
+    /// setting. Where the new diff has the same number of hunks as the old, the
+    /// cached state (expanded, current_hunk, collapsed_hunks, context_lines) is
+    /// preserved in place. Where the count differs (or regeneration fails), the
+    /// file's diff is dropped so the file collapses; if the cursor was on a
+    /// hunk inside a dropped file, it is demoted to the file row.
+    fn regenerate_cached_diffs_for_whitespace_toggle(&mut self) {
+        let keys = self.navigation.cached_file_diff_keys();
+        for key in keys {
+            let Some((existing_count, diff_context, context_lines)) =
+                self.navigation.get_file_diff(&key).map(|s| {
+                    let count = s.diff.as_ref().map(|d| d.hunks.len()).unwrap_or(0);
+                    (count, s.diff_context.clone(), s.context_lines)
+                })
+            else {
+                continue;
+            };
+
+            let generator = DiffGenerator::new(self.repository.git2_repo());
+            let result = generator.generate_diff_with_context(
+                &key.path,
+                diff_context.clone(),
+                Some(context_lines as u32),
+                self.ignore_whitespace,
+            );
+
+            let preserved = match result {
+                Ok(new_diff) => {
+                    let merged = crate::diff::merge_adjacent_hunks(new_diff);
+                    if merged.hunks.len() == existing_count {
+                        if let Some(state) = self.navigation.get_file_diff_mut(&key) {
+                            state.diff = Some(merged);
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                }
+                Err(_) => false,
+            };
+
+            if !preserved {
+                self.navigation.remove_file_diff(&key);
+                self.demote_cursor_if_inside(&key);
+            }
+        }
+    }
+
+    /// If the cursor is on a hunk inside the file identified by `key`, demote
+    /// it to the file row (used after the file's cached diff has been dropped).
+    fn demote_cursor_if_inside(&mut self, key: &navigation::FileDiffKey) {
+        let Some(navigation::SelectionCursor::Hunk {
+            section,
+            file_index,
+            ..
+        }) = self.navigation.current_cursor()
+        else {
+            return;
+        };
+        let expected_section = navigation::StatusSection::from(key.context);
+        if section != expected_section {
+            return;
+        }
+        let path_at_index: Option<String> = match section {
+            navigation::StatusSection::Staged => self
+                .status
+                .staged_files()
+                .get(file_index)
+                .map(|f| f.path.clone()),
+            navigation::StatusSection::Unstaged => self
+                .status
+                .unstaged_files()
+                .get(file_index)
+                .map(|f| f.path.clone()),
+            navigation::StatusSection::Untracked => {
+                self.status.untracked_files().get(file_index).cloned()
+            }
+            navigation::StatusSection::Conflicted => {
+                self.status.conflicted_files().get(file_index).cloned()
+            }
+        };
+        if path_at_index.as_deref() == Some(key.path.as_str()) {
+            self.navigation.apply_cursor(
+                &self.status,
+                Some(navigation::SelectionCursor::File {
+                    section,
+                    file_index,
+                }),
+            );
         }
     }
 
@@ -1484,6 +1595,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         }
     }
 
@@ -1506,6 +1618,167 @@ mod tests {
     fn create_test_file(repo_dir: &std::path::Path, name: &str, content: &str) {
         let file_path = repo_dir.join(name);
         fs::write(&file_path, content).unwrap();
+    }
+
+    fn create_test_repo_with_initial_commit(name: &str) -> (Repository, tempfile::TempDir) {
+        let (repo, temp_dir) = create_test_repo(name);
+        create_test_file(temp_dir.path(), "seed.txt", "seed\n");
+        repo.add_to_index("seed.txt").unwrap();
+        CommitOperations::new(&repo)
+            .execute_commit("seed", &Default::default())
+            .unwrap();
+        (repo, temp_dir)
+    }
+
+    #[test]
+    fn test_toggle_ignore_whitespace_command_flips_flag() {
+        let (repo, _temp_dir) = create_test_repo_with_initial_commit("toggle_ws");
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+
+        assert!(!app.ignore_whitespace);
+        app.handle_command(Command::ToggleIgnoreWhitespace);
+        assert!(app.ignore_whitespace);
+        app.handle_command(Command::ToggleIgnoreWhitespace);
+        assert!(!app.ignore_whitespace);
+    }
+
+    /// Helper: in repo `repo` with workdir `dir`, add `name` with `committed`
+    /// content, commit it, then overwrite the working copy with `working`.
+    fn commit_then_modify_workdir(
+        repo: &Repository,
+        dir: &std::path::Path,
+        name: &str,
+        committed: &str,
+        working: &str,
+    ) {
+        create_test_file(dir, name, committed);
+        repo.add_to_index(name).unwrap();
+        CommitOperations::new(repo)
+            .execute_commit(&format!("add {}", name), &Default::default())
+            .unwrap();
+        create_test_file(dir, name, working);
+    }
+
+    /// Drive the app to expand the file diff for `path` in the unstaged section
+    /// and place the cursor on hunk 0.
+    fn expand_file_and_select_first_hunk(app: &mut App, path: &str) {
+        use crate::diff::{DiffContext, DiffGenerator};
+        use crate::ui::navigation::{FileContext, FileDiffKey};
+
+        let key = FileDiffKey::new(path.to_string(), FileContext::Unstaged);
+        let generator = DiffGenerator::new(app.repository.git2_repo());
+        let diff = generator
+            .generate_diff_with_context(
+                path,
+                DiffContext::WorkingTreeToIndex,
+                None,
+                app.ignore_whitespace,
+            )
+            .unwrap();
+        let merged = crate::diff::merge_adjacent_hunks(diff);
+        app.navigation
+            .set_file_diff(key.clone(), merged, DiffContext::WorkingTreeToIndex);
+
+        // Find the file's index in the unstaged section so we can build a
+        // matching cursor.
+        let file_index = app
+            .status
+            .unstaged_files()
+            .iter()
+            .position(|f| f.path == path)
+            .expect("file should appear unstaged");
+        let cursor = navigation::SelectionCursor::Hunk {
+            section: navigation::StatusSection::Unstaged,
+            file_index,
+            hunk_index: 0,
+        };
+        app.navigation.apply_cursor(&app.status, Some(cursor));
+    }
+
+    #[test]
+    fn test_toggle_preserves_diff_when_hunk_count_unchanged() {
+        use crate::ui::navigation::{FileContext, FileDiffKey};
+
+        let (repo, temp_dir) = create_test_repo_with_initial_commit("toggle_preserve");
+        // Substantive change only — no whitespace difference.
+        commit_then_modify_workdir(
+            &repo,
+            temp_dir.path(),
+            "code.txt",
+            "let x = 1;\n",
+            "let x = 99;\n",
+        );
+
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+        expand_file_and_select_first_hunk(&mut app, "code.txt");
+
+        let key = FileDiffKey::new("code.txt".to_string(), FileContext::Unstaged);
+        let hunks_before = app
+            .navigation
+            .get_file_diff(&key)
+            .and_then(|s| s.diff.as_ref())
+            .map(|d| d.hunks.len())
+            .unwrap();
+        assert!(hunks_before > 0);
+
+        let cursor_before = app.navigation.current_cursor();
+
+        app.handle_command(Command::ToggleIgnoreWhitespace);
+
+        let state = app
+            .navigation
+            .get_file_diff(&key)
+            .expect("file diff entry must be preserved when hunk count is unchanged");
+        assert!(state.expanded);
+        assert_eq!(
+            state.diff.as_ref().unwrap().hunks.len(),
+            hunks_before,
+            "hunk count should be unchanged for substantive-only edits"
+        );
+        assert_eq!(
+            app.navigation.current_cursor(),
+            cursor_before,
+            "cursor must stay on the same hunk"
+        );
+    }
+
+    #[test]
+    fn test_toggle_collapses_file_and_demotes_cursor_when_hunk_count_changes() {
+        use crate::ui::navigation::{FileContext, FileDiffKey};
+
+        let (repo, temp_dir) = create_test_repo_with_initial_commit("toggle_collapse");
+        // Whitespace-only change — toggling ignore_whitespace will drop hunks.
+        commit_then_modify_workdir(
+            &repo,
+            temp_dir.path(),
+            "ws.txt",
+            "let x = 1;\n",
+            "let     x = 1;\n",
+        );
+
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+        expand_file_and_select_first_hunk(&mut app, "ws.txt");
+
+        let key = FileDiffKey::new("ws.txt".to_string(), FileContext::Unstaged);
+        assert!(app.navigation.get_file_diff(&key).is_some());
+
+        app.handle_command(Command::ToggleIgnoreWhitespace);
+
+        assert!(
+            app.navigation.get_file_diff(&key).is_none(),
+            "file diff must be dropped when hunk count changes"
+        );
+
+        match app.navigation.current_cursor() {
+            Some(navigation::SelectionCursor::File { .. }) => {}
+            other => panic!(
+                "cursor should be demoted to file-level when its hunk's file collapses, got {:?}",
+                other
+            ),
+        }
     }
 
     #[test]

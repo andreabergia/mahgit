@@ -103,6 +103,17 @@ impl From<StatusSection> for FileContext {
     }
 }
 
+impl From<FileContext> for StatusSection {
+    fn from(context: FileContext) -> Self {
+        match context {
+            FileContext::Staged => StatusSection::Staged,
+            FileContext::Unstaged => StatusSection::Unstaged,
+            FileContext::Untracked => StatusSection::Untracked,
+            FileContext::Conflicted => StatusSection::Conflicted,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct SectionInfo {
     section_type: StatusSection,
@@ -340,6 +351,10 @@ impl NavigationState {
 
     pub fn clear_diff_cache(&mut self) {
         self.file_diffs.clear();
+    }
+
+    pub fn cached_file_diff_keys(&self) -> Vec<FileDiffKey> {
+        self.file_diffs.keys().cloned().collect()
     }
 
     pub fn reset_inline_diff_selection(&mut self, key: &FileDiffKey) {

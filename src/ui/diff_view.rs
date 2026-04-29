@@ -597,6 +597,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let diff_view = DiffView::new(diff, config);
         assert_eq!(diff_view.scroll_position, 0);
@@ -610,6 +611,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 2; // Small viewport to enable scrolling
@@ -636,6 +638,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let diff_view = DiffView::new(diff, config);
         match &diff_view.content {
@@ -652,6 +655,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
@@ -676,6 +680,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
@@ -778,6 +783,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 10;
@@ -811,6 +817,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 4;
@@ -835,6 +842,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let single_hunk_view = DiffView::new(single_hunk_diff, config.clone());
         assert_eq!(single_hunk_view.get_hunk_count(), 1);
@@ -863,6 +871,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let diff_view = DiffView::new(diff.clone(), config.clone());
 
@@ -895,6 +904,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let mut diff_view = DiffView::new(diff.clone(), config.clone());
 
@@ -927,6 +937,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 5;
@@ -968,6 +979,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let diff_view = DiffView::new(diff.clone(), config);
 
@@ -1023,6 +1035,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         let mut diff_view = DiffView::new(diff, config);
         diff_view.viewport_height = 5;

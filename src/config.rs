@@ -11,6 +11,7 @@ struct ConfigFile {
     tab_width: usize,
     show_line_numbers: bool,
     word_wrap: bool,
+    ignore_whitespace: bool,
 }
 
 impl Default for ConfigFile {
@@ -20,6 +21,7 @@ impl Default for ConfigFile {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         }
     }
 }
@@ -32,6 +34,7 @@ pub struct Config {
     pub tab_width: usize,
     pub show_line_numbers: bool,
     pub word_wrap: bool,
+    pub ignore_whitespace: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -88,8 +91,7 @@ impl Config {
                 toml::from_str(&contents).map_err(|e| ConfigError::ParseError(path.clone(), e))?;
 
             // Later files override earlier ones
-            config_file.theme = parsed.theme;
-            config_file.tab_width = parsed.tab_width;
+            config_file = parsed;
         }
 
         // Validate theme exists and resolve it
@@ -101,6 +103,7 @@ impl Config {
             tab_width: config_file.tab_width,
             show_line_numbers: config_file.show_line_numbers,
             word_wrap: config_file.word_wrap,
+            ignore_whitespace: config_file.ignore_whitespace,
         })
     }
 
@@ -193,6 +196,15 @@ mod tests {
         assert_eq!(config_file.theme, "github-dark");
         assert_eq!(config_file.tab_width, 4);
         assert!(config_file.show_line_numbers);
+        assert!(!config_file.word_wrap);
+        assert!(!config_file.ignore_whitespace);
+    }
+
+    #[test]
+    fn test_config_file_parses_ignore_whitespace() {
+        let toml = "ignore_whitespace = true\n";
+        let parsed: ConfigFile = toml::from_str(toml).unwrap();
+        assert!(parsed.ignore_whitespace);
     }
 
     #[test]
@@ -202,6 +214,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         assert_eq!(config.expand_tabs("\thello"), "    hello");
 
@@ -210,6 +223,7 @@ mod tests {
             tab_width: 8,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         };
         assert_eq!(config_width_8.expand_tabs("\thello"), "        hello");
     }

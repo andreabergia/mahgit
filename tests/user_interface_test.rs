@@ -40,6 +40,7 @@ fn test_help_window() {
         tab_width: 4,
         show_line_numbers: true,
         word_wrap: false,
+        ignore_whitespace: false,
     };
     let mut app = App::new(repository, status, config);
 
@@ -71,6 +72,7 @@ fn test_help_window_esc_behavior() {
         tab_width: 4,
         show_line_numbers: true,
         word_wrap: false,
+        ignore_whitespace: false,
     };
     let mut app = App::new(repository, status, config);
 

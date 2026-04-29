@@ -96,6 +96,7 @@ fn test_diff_renderer_has_syntax_highlighter() {
         tab_width: 4,
         show_line_numbers: false,
         word_wrap: false,
+        ignore_whitespace: false,
     };
 
     let renderer = DiffRenderer::new(&config);
@@ -117,6 +118,7 @@ fn test_render_context_detects_syntax() {
         tab_width: 4,
         show_line_numbers: false,
         word_wrap: false,
+        ignore_whitespace: false,
     };
     let renderer = DiffRenderer::new(&config);
     let diff = create_rust_diff();
@@ -136,6 +138,7 @@ fn test_formatted_line_has_syntax_colors() {
         tab_width: 4,
         show_line_numbers: false,
         word_wrap: false,
+        ignore_whitespace: false,
     };
     let renderer = DiffRenderer::new(&config);
     let diff = create_rust_diff();
@@ -198,6 +201,7 @@ fn test_addition_line_has_syntax_colors() {
         tab_width: 4,
         show_line_numbers: false,
         word_wrap: false,
+        ignore_whitespace: false,
     };
     let renderer = DiffRenderer::new(&config);
     let diff = create_rust_diff();
@@ -259,6 +263,7 @@ fn test_full_diff_rendering() {
         tab_width: 4,
         show_line_numbers: false,
         word_wrap: false,
+        ignore_whitespace: false,
     };
     let renderer = DiffRenderer::new(&config);
     let diff = create_rust_diff();

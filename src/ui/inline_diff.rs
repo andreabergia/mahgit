@@ -65,6 +65,7 @@ mod tests {
             tab_width: 4,
             show_line_numbers: true,
             word_wrap: false,
+            ignore_whitespace: false,
         }
     }
 

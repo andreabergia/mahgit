@@ -31,7 +31,7 @@ impl<'repo> DiffGenerator<'repo> {
     }
 
     pub fn generate_diff(&self, file_path: &str, context: DiffContext) -> Result<Diff, DiffError> {
-        self.generate_diff_with_context(file_path, context, None)
+        self.generate_diff_with_context(file_path, context, None, false)
     }
 
     pub fn generate_diff_with_context(
@@ -39,12 +39,14 @@ impl<'repo> DiffGenerator<'repo> {
         file_path: &str,
         context: DiffContext,
         context_lines: Option<u32>,
+        ignore_whitespace: bool,
     ) -> Result<Diff, DiffError> {
         // Pre-check file size and binary status
         self.check_file_constraints(file_path, &context)?;
         let mut diff_options = DiffOptions::new();
         diff_options.pathspec(file_path);
         diff_options.context_lines(context_lines.unwrap_or(3));
+        diff_options.ignore_whitespace(ignore_whitespace);
 
         let git_diff = match context {
             DiffContext::WorkingTreeToIndex => {
@@ -627,6 +629,165 @@ mod tests {
         assert_eq!(hunk.lines[1].content, "New file line 2");
         assert_eq!(hunk.lines[0].new_line_no, Some(1));
         assert_eq!(hunk.lines[1].new_line_no, Some(2));
+    }
+
+    /// Helper: stage `committed` content as a tracked file, then write `working`
+    /// to the working tree so the diff between index/head and worktree exposes
+    /// the change.
+    fn stage_then_modify(
+        repo: &Repository,
+        dir: &Path,
+        name: &str,
+        committed: &str,
+        working: &str,
+    ) {
+        let path = dir.join(name);
+        fs::write(&path, committed).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new(name)).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::new("Test", "test@example.com", &git2::Time::new(1, 0)).unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "stage", &tree, &[&parent])
+            .unwrap();
+        fs::write(&path, working).unwrap();
+    }
+
+    #[test]
+    fn test_ignore_whitespace_hides_whitespace_only_changes_workdir() {
+        let (temp_dir, repo) = setup_test_repo();
+        stage_then_modify(
+            &repo,
+            temp_dir.path(),
+            "ws.txt",
+            "fn main() {\n    let x = 1;\n}\n",
+            "fn main() {\n        let x = 1;\n}\n",
+        );
+
+        let generator = DiffGenerator::new(&repo);
+
+        let diff_normal = generator
+            .generate_diff_with_context("ws.txt", DiffContext::WorkingTreeToHead, None, false)
+            .unwrap();
+        assert!(
+            !diff_normal.hunks.is_empty(),
+            "without ignore_whitespace, the indentation change should produce a hunk"
+        );
+
+        let diff_ignored = generator
+            .generate_diff_with_context("ws.txt", DiffContext::WorkingTreeToHead, None, true)
+            .unwrap();
+        assert!(
+            diff_ignored.hunks.is_empty(),
+            "with ignore_whitespace, a whitespace-only change must produce no hunks"
+        );
+    }
+
+    #[test]
+    fn test_ignore_whitespace_keeps_substantive_changes() {
+        let (temp_dir, repo) = setup_test_repo();
+        stage_then_modify(
+            &repo,
+            temp_dir.path(),
+            "mixed.txt",
+            "let x = 1;\nlet y = 2;\n",
+            "let    x = 1;\nlet y = 99;\n",
+        );
+
+        let generator = DiffGenerator::new(&repo);
+
+        let diff = generator
+            .generate_diff_with_context("mixed.txt", DiffContext::WorkingTreeToHead, None, true)
+            .unwrap();
+
+        assert!(!diff.hunks.is_empty(), "substantive change must survive");
+
+        let any_99 = diff
+            .hunks
+            .iter()
+            .flat_map(|h| h.lines.iter())
+            .any(|l| l.content.contains("99"));
+        assert!(any_99, "the y = 99 change must be present in the diff");
+
+        // With ignore_whitespace, the indentation change on the `x` line must
+        // not be classified as an addition or deletion — it should appear only
+        // as context (or not at all if outside the context window).
+        let x_change_treated_as_diff = diff.hunks.iter().flat_map(|h| h.lines.iter()).any(|l| {
+            (l.line_type == crate::diff::LineType::Addition
+                || l.line_type == crate::diff::LineType::Deletion)
+                && l.content.contains("x = 1")
+        });
+        assert!(
+            !x_change_treated_as_diff,
+            "the whitespace-only x indentation change must not be a +/- line"
+        );
+    }
+
+    #[test]
+    fn test_ignore_whitespace_index_to_head() {
+        let (temp_dir, repo) = setup_test_repo();
+        // Commit first version
+        let path = temp_dir.path().join("idx.txt");
+        fs::write(&path, "let x = 1;\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("idx.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::new("Test", "test@example.com", &git2::Time::new(1, 0)).unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "first", &tree, &[&parent])
+            .unwrap();
+
+        // Stage a whitespace-only modification (different content in worktree gets re-added to index)
+        fs::write(&path, "let     x = 1;\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("idx.txt")).unwrap();
+        index.write().unwrap();
+
+        let generator = DiffGenerator::new(&repo);
+
+        let diff_normal = generator
+            .generate_diff_with_context("idx.txt", DiffContext::IndexToHead, None, false)
+            .unwrap();
+        assert!(!diff_normal.hunks.is_empty());
+
+        let diff_ignored = generator
+            .generate_diff_with_context("idx.txt", DiffContext::IndexToHead, None, true)
+            .unwrap();
+        assert!(
+            diff_ignored.hunks.is_empty(),
+            "IndexToHead must respect ignore_whitespace too"
+        );
+    }
+
+    #[test]
+    fn test_ignore_whitespace_workdir_to_index() {
+        let (temp_dir, repo) = setup_test_repo();
+        stage_then_modify(
+            &repo,
+            temp_dir.path(),
+            "wti.txt",
+            "let x = 1;\n",
+            "let     x = 1;\n",
+        );
+
+        let generator = DiffGenerator::new(&repo);
+
+        let diff_normal = generator
+            .generate_diff_with_context("wti.txt", DiffContext::WorkingTreeToIndex, None, false)
+            .unwrap();
+        assert!(!diff_normal.hunks.is_empty());
+
+        let diff_ignored = generator
+            .generate_diff_with_context("wti.txt", DiffContext::WorkingTreeToIndex, None, true)
+            .unwrap();
+        assert!(
+            diff_ignored.hunks.is_empty(),
+            "WorkingTreeToIndex must respect ignore_whitespace too"
+        );
     }
 
     #[test]
