@@ -316,6 +316,9 @@ impl<'a> LogView<'a> {
         let render_context = crate::ui::diff_renderer::DiffRenderContext::new(&renderer, diff);
 
         for (hunk_idx, hunk) in diff.hunks.iter().enumerate() {
+            let is_collapsed = self
+                .navigation
+                .is_hunk_collapsed(commit_idx, file_idx, hunk_idx);
             let is_hunk_selected = matches!(
                 cursor,
                 Some(LogCursor::Hunk { commit_index, file_index, hunk_index })
@@ -335,21 +338,24 @@ impl<'a> LogView<'a> {
                 self.config.theme.diff_hunk_header
             };
 
+            let collapse_indicator = if is_collapsed { "▸" } else { "▾" };
             items.push(ListItem::new(Line::from(Span::styled(
-                format!("      {}", hunk.header.raw),
+                format!("      {} {}", collapse_indicator, hunk.header.raw),
                 header_style,
             ))));
 
-            let mut highlighter = render_context.create_fresh_highlighter();
+            if !is_collapsed {
+                let mut highlighter = render_context.create_fresh_highlighter();
 
-            for line in &hunk.lines {
-                let formatted_line = render_context.format_diff_line(
-                    line,
-                    is_hunk_selected,
-                    Some("        "),
-                    highlighter.as_mut(),
-                );
-                items.push(ListItem::new(formatted_line));
+                for line in &hunk.lines {
+                    let formatted_line = render_context.format_diff_line(
+                        line,
+                        is_hunk_selected,
+                        Some("        "),
+                        highlighter.as_mut(),
+                    );
+                    items.push(ListItem::new(formatted_line));
+                }
             }
 
             if diff.hunks.len() > 1 {

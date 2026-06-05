@@ -27,6 +27,7 @@ pub struct CommitExpansion {
     pub files: Vec<CommitFileChange>,
     pub file_diffs: HashMap<usize, Diff>,
     pub expanded_files: HashSet<usize>,
+    pub collapsed_hunks: HashMap<usize, HashSet<usize>>,
 }
 
 pub struct LogNavigationState {
@@ -82,6 +83,60 @@ impl LogNavigationState {
         self.expansions
             .get(&commit_index)
             .is_some_and(|e| e.expanded_files.contains(&file_index))
+    }
+
+    pub fn collapse_file(&mut self, commit_index: usize, file_index: usize) {
+        self.clear_manual_scroll();
+
+        if let Some(expansion) = self.expansions.get_mut(&commit_index) {
+            expansion.expanded_files.remove(&file_index);
+        }
+
+        if matches!(
+            self.cursor,
+            Some(LogCursor::Hunk {
+                commit_index: cursor_commit,
+                file_index: cursor_file,
+                ..
+            }) if cursor_commit == commit_index && cursor_file == file_index
+        ) {
+            self.cursor = Some(LogCursor::File {
+                commit_index,
+                file_index,
+            });
+        }
+    }
+
+    pub fn toggle_hunk_collapsed(
+        &mut self,
+        commit_index: usize,
+        file_index: usize,
+        hunk_index: usize,
+    ) {
+        self.clear_manual_scroll();
+
+        let Some(expansion) = self.expansions.get_mut(&commit_index) else {
+            return;
+        };
+
+        let collapsed_hunks = expansion.collapsed_hunks.entry(file_index).or_default();
+        if collapsed_hunks.contains(&hunk_index) {
+            collapsed_hunks.remove(&hunk_index);
+        } else {
+            collapsed_hunks.insert(hunk_index);
+        }
+    }
+
+    pub fn is_hunk_collapsed(
+        &self,
+        commit_index: usize,
+        file_index: usize,
+        hunk_index: usize,
+    ) -> bool {
+        self.expansions
+            .get(&commit_index)
+            .and_then(|expansion| expansion.collapsed_hunks.get(&file_index))
+            .is_some_and(|hunks| hunks.contains(&hunk_index))
     }
 
     pub fn move_to_next(&mut self, log_data: &LogData) {
@@ -435,7 +490,12 @@ impl LogNavigationState {
                                 return Some(flat_index);
                             }
                             flat_index += 1; // hunk header
-                            flat_index += hunk.lines.len(); // diff lines
+                            if !self.is_hunk_collapsed(commit_idx, file_idx, hunk_idx) {
+                                flat_index += hunk.lines.len(); // diff lines
+                            }
+                            if diff.hunks.len() > 1 {
+                                flat_index += 1; // separator line
+                            }
                         }
                     }
                 }
@@ -465,5 +525,149 @@ impl LogNavigationState {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diff::{Diff, DiffContext, DiffHunk, DiffLine, HunkHeader, LineRange, LineType};
+    use crate::log::{LogData, LogEntry};
+    use crate::repository::{CommitChangeType, CommitFileChange};
+
+    fn sample_hunk(label: &str, line_count: usize) -> DiffHunk {
+        let lines = (0..line_count)
+            .map(|index| DiffLine {
+                content: format!("line {index}"),
+                line_type: LineType::Context,
+                old_line_no: Some(index + 1),
+                new_line_no: Some(index + 1),
+                inline_diff: None,
+            })
+            .collect();
+
+        DiffHunk {
+            header: HunkHeader {
+                raw: format!("@@ {label} @@"),
+                old_start: 1,
+                old_lines: 1,
+                new_start: 1,
+                new_lines: 1,
+            },
+            lines,
+            old_range: LineRange { start: 1, count: 1 },
+            new_range: LineRange { start: 1, count: 1 },
+            stageable: false,
+            context_lines: 0,
+        }
+    }
+
+    fn sample_diff(hunks: Vec<DiffHunk>) -> Diff {
+        Diff {
+            file_path: "file.txt".to_string(),
+            context: DiffContext::WorkingTreeToHead,
+            hunks,
+            binary: false,
+        }
+    }
+
+    fn sample_expansion(diff: Diff) -> CommitExpansion {
+        let mut file_diffs = HashMap::new();
+        file_diffs.insert(0, diff);
+
+        let mut expanded_files = HashSet::new();
+        expanded_files.insert(0);
+
+        CommitExpansion {
+            expanded: true,
+            files: vec![CommitFileChange {
+                path: "file.txt".to_string(),
+                old_path: None,
+                change_type: CommitChangeType::Modified,
+            }],
+            file_diffs,
+            expanded_files,
+            collapsed_hunks: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn collapse_file_from_hunk_cursor_collapses_parent_and_selects_file() {
+        let mut navigation = LogNavigationState::new();
+        navigation.set_expansion(0, sample_expansion(sample_diff(vec![sample_hunk("h1", 0)])));
+        navigation.cursor = Some(LogCursor::Hunk {
+            commit_index: 0,
+            file_index: 0,
+            hunk_index: 0,
+        });
+
+        navigation.collapse_file(0, 0);
+
+        assert!(!navigation.is_file_expanded(0, 0));
+        assert_eq!(
+            navigation.current_cursor(),
+            Some(LogCursor::File {
+                commit_index: 0,
+                file_index: 0
+            })
+        );
+    }
+
+    #[test]
+    fn toggle_hunk_collapsed_keeps_file_expanded_and_cursor_on_hunk() {
+        let mut navigation = LogNavigationState::new();
+        navigation.set_expansion(0, sample_expansion(sample_diff(vec![sample_hunk("h1", 0)])));
+        navigation.cursor = Some(LogCursor::Hunk {
+            commit_index: 0,
+            file_index: 0,
+            hunk_index: 0,
+        });
+
+        navigation.toggle_hunk_collapsed(0, 0, 0);
+
+        assert!(navigation.is_file_expanded(0, 0));
+        assert!(navigation.is_hunk_collapsed(0, 0, 0));
+        assert_eq!(
+            navigation.current_cursor(),
+            Some(LogCursor::Hunk {
+                commit_index: 0,
+                file_index: 0,
+                hunk_index: 0
+            })
+        );
+
+        navigation.toggle_hunk_collapsed(0, 0, 0);
+
+        assert!(!navigation.is_hunk_collapsed(0, 0, 0));
+    }
+
+    #[test]
+    fn cursor_flat_index_counts_collapsed_hunk_as_header_only() {
+        let mut log_data = LogData::new("main".to_string());
+        log_data.entries.push(LogEntry {
+            oid: git2::Oid::zero(),
+            short_hash: "0000000".to_string(),
+            summary: "commit".to_string(),
+            author_name: "Test User".to_string(),
+            author_email: "test@example.com".to_string(),
+            time: git2::Time::new(0, 0),
+        });
+
+        let mut navigation = LogNavigationState::new();
+        navigation.set_expansion(
+            0,
+            sample_expansion(sample_diff(vec![
+                sample_hunk("h1", 2),
+                sample_hunk("h2", 1),
+            ])),
+        );
+        navigation.toggle_hunk_collapsed(0, 0, 0);
+        navigation.cursor = Some(LogCursor::Hunk {
+            commit_index: 0,
+            file_index: 0,
+            hunk_index: 1,
+        });
+
+        assert_eq!(navigation.cursor_flat_index(&log_data), Some(4));
     }
 }

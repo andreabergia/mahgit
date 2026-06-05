@@ -1107,12 +1107,8 @@ impl App {
         match self.current_view {
             ViewType::Status => {
                 self.navigation.ensure_cursor_valid(&self.status);
-                let status_view = StatusView::new(
-                    &self.status,
-                    &self.navigation,
-                    &self.config,
-                    self.word_wrap,
-                );
+                let status_view =
+                    StatusView::new(&self.status, &self.navigation, &self.config, self.word_wrap);
                 status_view.render(f, area);
             }
             ViewType::Log => {
@@ -1803,6 +1799,7 @@ impl App {
                                         files,
                                         file_diffs: std::collections::HashMap::new(),
                                         expanded_files: std::collections::HashSet::new(),
+                                        collapsed_hunks: std::collections::HashMap::new(),
                                     };
                                     if let Some(nav) = &mut self.log_navigation {
                                         nav.set_expansion(index, expansion);
@@ -1832,10 +1829,8 @@ impl App {
                     .is_some_and(|nav| nav.is_file_expanded(commit_index, file_index));
 
                 if already_expanded {
-                    if let Some(nav) = &mut self.log_navigation
-                        && let Some(expansion) = nav.get_expansion_mut(commit_index)
-                    {
-                        expansion.expanded_files.remove(&file_index);
+                    if let Some(nav) = &mut self.log_navigation {
+                        nav.collapse_file(commit_index, file_index);
                     }
                 } else {
                     // Check if diff is already loaded
@@ -1890,8 +1885,14 @@ impl App {
                     }
                 }
             }
-            log_navigation::LogCursor::Hunk { .. } => {
-                // No expansion at hunk level
+            log_navigation::LogCursor::Hunk {
+                commit_index,
+                file_index,
+                hunk_index,
+            } => {
+                if let Some(nav) = &mut self.log_navigation {
+                    nav.toggle_hunk_collapsed(commit_index, file_index, hunk_index);
+                }
             }
         }
     }
