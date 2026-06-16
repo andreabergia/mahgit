@@ -7,17 +7,7 @@ separately.
 
 ## P1 — Correctness bugs
 
-### 1. Binary files in commit diffs are broken
-- `src/diff/generator.rs` (`generate_commit_file_diff`, ~line 165): returns
-  `Err(DiffError::BinaryFile)` for binary files.
-- `src/ui/mod.rs` (`toggle_log_expansion`, File branch): treats that error as a
-  generic "Failed to load diff" toast, so the file never expands.
-- Consequence: the `diff.binary` "Binary file (not shown)" branch in
-  `src/ui/log_view.rs:305-313` is unreachable dead code.
-- Fix: in the File-expansion error arm, match `DiffError::BinaryFile` and store
-  `Diff { binary: true, hunks: vec![], .. }` so the file expands and renders the
-  graceful message. Consider the same treatment for
-  `DiffError::TerminalCompatibility`.
+### 1. Binary files in commit diffs are broken — DONE
 
 ### 2. `format_relative_time` can panic the render loop
 - `src/ui/log_view.rs:369-372`: `duration_since(UNIX_EPOCH).unwrap()` panics if

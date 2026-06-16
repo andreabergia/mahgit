@@ -393,7 +393,7 @@ impl<'repo> DiffGenerator<'repo> {
         let mut binary = false;
         let mut line_count = 0;
 
-        git_diff.print(git2::DiffFormat::Patch, |delta, hunk, line| {
+        let print_result = git_diff.print(git2::DiffFormat::Patch, |delta, hunk, line| {
             if delta.flags().contains(git2::DiffFlags::BINARY) {
                 binary = true;
                 return false;
@@ -469,11 +469,16 @@ impl<'repo> DiffGenerator<'repo> {
             }
 
             true
-        })?;
+        });
 
+        // A binary file makes the callback abort, which surfaces as a print
+        // error. Detect that case before propagating the error so callers get a
+        // meaningful `BinaryFile` instead of an opaque git error.
         if binary {
             return Err(DiffError::BinaryFile(file_path.to_string()));
         }
+
+        print_result?;
 
         let mut diff = Diff {
             file_path: file_path.to_string(),
@@ -693,6 +698,35 @@ mod tests {
                 // Expected
             }
             _ => panic!("Expected binary file error"),
+        }
+    }
+
+    /// Stage `name` with `bytes` and create a commit on top of HEAD,
+    /// returning the new commit oid.
+    fn commit_file_bytes(repo: &Repository, dir: &Path, name: &str, bytes: &[u8]) -> git2::Oid {
+        std::fs::write(dir.join(name), bytes).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new(name)).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::new("Test", "test@example.com", &git2::Time::new(0, 0)).unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "add file", &tree, &[&parent])
+            .unwrap()
+    }
+
+    #[test]
+    fn test_commit_file_diff_binary_returns_binary_error() {
+        let (temp_dir, repo) = setup_test_repo();
+        let oid = commit_file_bytes(&repo, temp_dir.path(), "data.bin", &[0u8, 1, 2, 0, 255]);
+
+        let generator = DiffGenerator::new(&repo);
+        let result = generator.generate_commit_file_diff(oid, "data.bin");
+
+        match result {
+            Err(DiffError::BinaryFile(path)) => assert_eq!(path, "data.bin"),
+            other => panic!("Expected BinaryFile error, got {:?}", other),
         }
     }
 

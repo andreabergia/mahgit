@@ -1863,14 +1863,20 @@ impl App {
                         if let Some((oid, file_path)) = info {
                             let diff_gen =
                                 crate::diff::DiffGenerator::new(self.repository.git2_repo());
-                            match diff_gen.generate_commit_file_diff(oid, &file_path) {
-                                Ok(diff) => {
-                                    if let Some(nav) = &mut self.log_navigation
-                                        && let Some(expansion) = nav.get_expansion_mut(commit_index)
-                                    {
-                                        expansion.file_diffs.insert(file_index, diff);
-                                        expansion.expanded_files.insert(file_index);
-                                    }
+                            let diff_result = diff_gen.generate_commit_file_diff(oid, &file_path);
+                            let diff = match diff_result {
+                                Ok(diff) => Some(diff),
+                                // Binary diffs can't be rendered as hunks, but
+                                // the file should still expand and show a
+                                // graceful "Binary file" placeholder rather than
+                                // be swallowed by a toast.
+                                Err(crate::diff::generator::DiffError::BinaryFile(_)) => {
+                                    Some(crate::diff::Diff {
+                                        file_path,
+                                        context: crate::diff::DiffContext::IndexToHead,
+                                        hunks: vec![],
+                                        binary: true,
+                                    })
                                 }
                                 Err(err) => {
                                     self.feedback_manager.show_result(
@@ -1879,7 +1885,16 @@ impl App {
                                             err
                                         )),
                                     );
+                                    None
                                 }
+                            };
+
+                            if let Some(diff) = diff
+                                && let Some(nav) = &mut self.log_navigation
+                                && let Some(expansion) = nav.get_expansion_mut(commit_index)
+                            {
+                                expansion.file_diffs.insert(file_index, diff);
+                                expansion.expanded_files.insert(file_index);
                             }
                         }
                     }
@@ -2479,5 +2494,44 @@ mod tests {
         // Attempting to prepare amend without HEAD should fail
         let result = commit_ops.prepare_commit(input::CommitMode::Amend);
         assert!(result.is_err());
+    }
+
+    /// Commit a binary file (with null bytes) so its diff triggers
+    /// `DiffError::BinaryFile`.
+    fn commit_binary_file(repo: &Repository, dir: &std::path::Path, name: &str) {
+        let file_path = dir.join(name);
+        fs::write(&file_path, [0u8, 1u8, 2u8, 0u8, 255u8]).unwrap();
+        repo.add_to_index(name).unwrap();
+        CommitOperations::new(repo)
+            .execute_commit(&format!("add {}", name), &Default::default())
+            .unwrap();
+    }
+
+    #[test]
+    fn test_expand_binary_file_in_log_marks_diff_binary() {
+        let (repo, temp_dir) = create_test_repo_with_initial_commit("log_binary");
+        commit_binary_file(&repo, temp_dir.path(), "data.bin");
+
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+
+        app.open_log_view();
+        // Cursor starts on the most recent commit (the binary one).
+        app.toggle_log_expansion(); // expand commit -> loads file list
+        app.handle_command(Command::MoveDown); // move to the file
+        app.toggle_log_expansion(); // expand file -> loads (binary) diff
+
+        let nav = app.log_navigation.as_ref().unwrap();
+        assert!(
+            nav.is_file_expanded(0, 0),
+            "binary file should expand instead of being swallowed by a toast"
+        );
+        let expansion = nav.get_expansion(0).unwrap();
+        let diff = expansion
+            .file_diffs
+            .get(&0)
+            .expect("a diff should be stored for the binary file");
+        assert!(diff.binary, "stored diff should be flagged binary");
+        assert!(diff.hunks.is_empty(), "binary diff should have no hunks");
     }
 }
