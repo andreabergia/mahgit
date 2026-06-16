@@ -13,12 +13,10 @@ separately.
 - Used `unwrap_or_default()` and extracted a pure `relative_time(now, commit)`
   helper, now unit-tested (incl. clock-before-epoch case).
 
-### 3. Pagination unreachable except via single-step `j`
-- `src/ui/mod.rs` (`handle_log_command`): load-more only fires in the
-  `MoveDown | ScrollDiffDown` arm. `G` (MoveToBottom), PageDown, and viewport
-  scroll never paginate, so `G` stops at the first batch (commit #49).
-- Fix: run the load-more check after `MoveToBottom` and `PageDiffDown` as well
-  (or drive load-more off the rendered viewport reaching `has_more`).
+### 3. Pagination unreachable except via single-step `j` — DONE
+- Extracted the load-more check into `maybe_load_more_log_entries` and call it
+  after `MoveDown`, `MoveToBottom` (`G`), and `PageDiffDown`. Unit-tested with a
+  55-commit repo: `G` now loads the second batch.
 
 ## P2 — Correctness / state polish
 

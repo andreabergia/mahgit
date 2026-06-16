@@ -485,28 +485,7 @@ impl App {
                 {
                     log_nav.move_to_next(log_data);
                 }
-                // Load more if near the bottom (separate borrow scope)
-                let should_load = self
-                    .log_navigation
-                    .as_ref()
-                    .and_then(|nav| nav.current_cursor())
-                    .and_then(|cursor| {
-                        if let log_navigation::LogCursor::Commit { index } = cursor {
-                            self.log_data.as_ref().and_then(|data| {
-                                if index >= data.entries.len().saturating_sub(10) && data.has_more {
-                                    Some(())
-                                } else {
-                                    None
-                                }
-                            })
-                        } else {
-                            None
-                        }
-                    })
-                    .is_some();
-                if should_load {
-                    self.load_more_log_entries();
-                }
+                self.maybe_load_more_log_entries();
             }
             Command::ScrollViewportUp => {
                 if let Some(log_nav) = &self.log_navigation {
@@ -529,6 +508,7 @@ impl App {
                 {
                     log_nav.move_to_bottom(log_data);
                 }
+                self.maybe_load_more_log_entries();
             }
             Command::ToggleAccordion => {
                 self.toggle_log_expansion();
@@ -552,6 +532,7 @@ impl App {
                 {
                     log_nav.page_down(log_data);
                 }
+                self.maybe_load_more_log_entries();
             }
             Command::ShowHelp => {
                 self.show_help = !self.show_help;
@@ -1726,6 +1707,32 @@ impl App {
         self.log_navigation = None;
     }
 
+    /// Load more log entries if the cursor is on a commit near the end of the
+    /// currently loaded window and more entries are available.
+    fn maybe_load_more_log_entries(&mut self) {
+        let should_load = self
+            .log_navigation
+            .as_ref()
+            .and_then(|nav| nav.current_cursor())
+            .and_then(|cursor| {
+                if let log_navigation::LogCursor::Commit { index } = cursor {
+                    self.log_data.as_ref().and_then(|data| {
+                        if index >= data.entries.len().saturating_sub(10) && data.has_more {
+                            Some(())
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    None
+                }
+            })
+            .is_some();
+        if should_load {
+            self.load_more_log_entries();
+        }
+    }
+
     /// Load more log entries
     fn load_more_log_entries(&mut self) {
         const BATCH_SIZE: usize = 50;
@@ -2533,5 +2540,44 @@ mod tests {
             .expect("a diff should be stored for the binary file");
         assert!(diff.binary, "stored diff should be flagged binary");
         assert!(diff.hunks.is_empty(), "binary diff should have no hunks");
+    }
+
+    /// Create `count` commits by repeatedly rewriting a single file.
+    fn create_many_commits(repo: &Repository, dir: &std::path::Path, count: usize) {
+        for i in 0..count {
+            create_test_file(dir, "log.txt", &format!("line {i}\n"));
+            repo.add_to_index("log.txt").unwrap();
+            CommitOperations::new(repo)
+                .execute_commit(&format!("commit {i}"), &Default::default())
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn test_move_to_bottom_paginates_log() {
+        let (repo, temp_dir) = create_test_repo_with_initial_commit("log_paginate");
+        // Initial batch is 50; create enough commits to require a second batch.
+        create_many_commits(&repo, temp_dir.path(), 55);
+
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+
+        app.open_log_view();
+        let log_data = app.log_data.as_ref().unwrap();
+        assert_eq!(
+            log_data.total_loaded, 50,
+            "only first batch loaded initially"
+        );
+        assert!(log_data.has_more, "more entries should be available");
+
+        // Jumping to the bottom should trigger pagination.
+        app.handle_command(Command::MoveToBottom);
+
+        let log_data = app.log_data.as_ref().unwrap();
+        assert!(
+            log_data.total_loaded > 50,
+            "G should load more entries, got {}",
+            log_data.total_loaded
+        );
     }
 }
