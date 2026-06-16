@@ -9,10 +9,9 @@ separately.
 
 ### 1. Binary files in commit diffs are broken — DONE
 
-### 2. `format_relative_time` can panic the render loop
-- `src/ui/log_view.rs:369-372`: `duration_since(UNIX_EPOCH).unwrap()` panics if
-  the system clock is before the Unix epoch — and it runs on every render.
-- Fix: use `unwrap_or_default()` (or map to `0`).
+### 2. `format_relative_time` can panic the render loop — DONE
+- Used `unwrap_or_default()` and extracted a pure `relative_time(now, commit)`
+  helper, now unit-tested (incl. clock-before-epoch case).
 
 ### 3. Pagination unreachable except via single-step `j`
 - `src/ui/mod.rs` (`handle_log_command`): load-more only fires in the

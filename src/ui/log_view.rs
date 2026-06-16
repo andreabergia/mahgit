@@ -368,9 +368,12 @@ impl<'a> LogView<'a> {
 fn format_relative_time(time: &git2::Time) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs() as i64;
-    let commit_time = time.seconds();
+    relative_time(now, time.seconds())
+}
+
+fn relative_time(now: i64, commit_time: i64) -> String {
     let delta = now - commit_time;
 
     if delta < 0 {
@@ -424,5 +427,50 @@ fn format_relative_time(time: &git2::Time) -> String {
         "1 year ago".to_string()
     } else {
         format!("{} years ago", years)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_relative_time_future() {
+        assert_eq!(relative_time(100, 200), "in the future");
+    }
+
+    #[test]
+    fn test_relative_time_just_now() {
+        assert_eq!(relative_time(1000, 1000), "just now");
+        assert_eq!(relative_time(1059, 1000), "just now");
+    }
+
+    #[test]
+    fn test_relative_time_minutes() {
+        assert_eq!(relative_time(1060, 1000), "1 minute ago");
+        assert_eq!(relative_time(1120, 1000), "2 minutes ago");
+    }
+
+    #[test]
+    fn test_relative_time_hours() {
+        assert_eq!(relative_time(3600, 0), "1 hour ago");
+        assert_eq!(relative_time(7200, 0), "2 hours ago");
+    }
+
+    #[test]
+    fn test_relative_time_days_weeks_months_years() {
+        assert_eq!(relative_time(86400, 0), "1 day ago");
+        assert_eq!(relative_time(604800, 0), "1 week ago");
+        assert_eq!(relative_time(2592000, 0), "1 month ago");
+        assert_eq!(relative_time(31536000, 0), "1 year ago");
+        assert_eq!(relative_time(63072000, 0), "2 years ago");
+    }
+
+    #[test]
+    fn test_relative_time_clock_before_epoch_does_not_panic() {
+        // now defaults to 0 when the system clock is before the Unix epoch;
+        // a commit at a positive time then reads as "in the future" rather
+        // than panicking the render loop.
+        assert_eq!(relative_time(0, 1000), "in the future");
     }
 }
