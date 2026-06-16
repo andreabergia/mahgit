@@ -426,7 +426,7 @@ impl LogNavigationState {
         self.manual_scroll_active.get()
     }
 
-    fn clear_manual_scroll(&self) {
+    pub fn clear_manual_scroll(&self) {
         self.manual_scroll_active.set(false);
     }
 

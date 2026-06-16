@@ -1764,6 +1764,12 @@ impl App {
 
         match cursor {
             log_navigation::LogCursor::Commit { index } => {
+                // Re-sync the cursor highlight after a manual scroll, matching
+                // file/hunk collapse behaviour.
+                if let Some(nav) = &self.log_navigation {
+                    nav.clear_manual_scroll();
+                }
+
                 // Toggle commit expansion - load files if first time
                 let already_expanded = self
                     .log_navigation
@@ -2540,6 +2546,37 @@ mod tests {
             .expect("a diff should be stored for the binary file");
         assert!(diff.binary, "stored diff should be flagged binary");
         assert!(diff.hunks.is_empty(), "binary diff should have no hunks");
+    }
+
+    #[test]
+    fn test_toggle_commit_expansion_clears_manual_scroll() {
+        let (repo, _temp_dir) = create_test_repo_with_initial_commit("log_commit_scroll");
+
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+
+        app.open_log_view();
+        // Simulate the user having manually scrolled the viewport.
+        app.log_navigation.as_ref().unwrap().scroll_viewport_down(1);
+        assert!(
+            app.log_navigation
+                .as_ref()
+                .unwrap()
+                .is_manual_scroll_active(),
+            "manual scroll should be active after scrolling"
+        );
+
+        // Toggling commit expansion should re-sync by clearing manual scroll,
+        // matching file/hunk collapse behaviour.
+        app.toggle_log_expansion();
+
+        assert!(
+            !app.log_navigation
+                .as_ref()
+                .unwrap()
+                .is_manual_scroll_active(),
+            "toggling commit expansion should clear manual scroll"
+        );
     }
 
     /// Create `count` commits by repeatedly rewriting a single file.

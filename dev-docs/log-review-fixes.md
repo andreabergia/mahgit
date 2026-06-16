@@ -20,12 +20,9 @@ separately.
 
 ## P2 — Correctness / state polish
 
-### 4. Commit expand/collapse doesn't clear manual scroll
-- `src/ui/mod.rs` (`toggle_log_expansion`, Commit branch): toggles `expanded`
-  but never calls `clear_manual_scroll` (file/hunk collapse already do).
-- Effect: after a manual scroll, the cursor highlight isn't re-synced until an
-  arrow key.
-- Fix: call `clear_manual_scroll` when commit expansion toggles.
+### 4. Commit expand/collapse doesn't clear manual scroll — DONE
+- `toggle_log_expansion` (Commit branch) now calls `clear_manual_scroll` (made
+  public on `LogNavigation`), matching file/hunk collapse. Unit-tested.
 
 ### 5. Re-clamp scroll offset when content shrinks
 - `src/ui/log_navigation.rs` / `update_viewport_metrics`: `scroll_offset` is not
