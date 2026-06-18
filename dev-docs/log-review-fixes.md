@@ -24,11 +24,10 @@ separately.
 - `toggle_log_expansion` (Commit branch) now calls `clear_manual_scroll` (made
   public on `LogNavigation`), matching file/hunk collapse. Unit-tested.
 
-### 5. Re-clamp scroll offset when content shrinks
-- `src/ui/log_navigation.rs` / `update_viewport_metrics`: `scroll_offset` is not
-  re-clamped against a freshly computed `max_scroll_offset`, so collapsing a
-  large commit can briefly show a blank viewport (self-corrects next key).
-- Fix: re-clamp `scroll_offset` inside `update_viewport_metrics`.
+### 5. Re-clamp scroll offset when content shrinks — DONE
+- `update_viewport_metrics` now clamps `scroll_offset` to the freshly computed
+  `max_scroll_offset`. Unit-tested (scroll to bottom, shrink content, offset
+  re-clamps).
 
 ### 6. Call `ensure_cursor_valid` in the Log render path
 - `src/ui/mod.rs` render: only Status calls `ensure_cursor_valid`. No live bug

@@ -432,8 +432,13 @@ impl LogNavigationState {
 
     pub fn update_viewport_metrics(&self, viewport_height: usize, total_items: usize) {
         self.viewport_height.set(viewport_height);
-        self.max_scroll_offset
-            .set(total_items.saturating_sub(viewport_height));
+        let max = total_items.saturating_sub(viewport_height);
+        self.max_scroll_offset.set(max);
+        // Re-clamp the offset so a shrunk content area can't leave us scrolled
+        // past the end (which would show a blank viewport).
+        if self.scroll_offset.get() > max {
+            self.scroll_offset.set(max);
+        }
     }
 
     pub fn viewport_height(&self) -> usize {
@@ -639,6 +644,20 @@ mod tests {
         navigation.toggle_hunk_collapsed(0, 0, 0);
 
         assert!(!navigation.is_hunk_collapsed(0, 0, 0));
+    }
+
+    #[test]
+    fn update_viewport_metrics_reclamps_scroll_offset_when_content_shrinks() {
+        let navigation = LogNavigationState::new();
+
+        // Large content: scroll all the way down.
+        navigation.update_viewport_metrics(10, 100);
+        navigation.scroll_viewport_down(90);
+        assert_eq!(navigation.scroll_offset(), 90);
+
+        // Content shrinks; offset must be re-clamped to the new max.
+        navigation.update_viewport_metrics(10, 20);
+        assert_eq!(navigation.scroll_offset(), 10);
     }
 
     #[test]
