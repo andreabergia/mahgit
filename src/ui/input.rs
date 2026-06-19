@@ -567,6 +567,27 @@ mod tests {
     }
 
     #[test]
+    fn test_ll_sequence() {
+        let mut handler = InputHandler::new();
+
+        let l_key = KeyEvent {
+            code: KeyCode::Char('l'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+
+        // First 'l' should return Pending (waiting for second 'l')
+        assert_eq!(handler.handle_key(l_key), InputResult::Pending);
+
+        // Second 'l' should open the log view
+        assert_eq!(
+            handler.handle_key(l_key),
+            InputResult::Command(Command::OpenLog)
+        );
+    }
+
+    #[test]
     fn test_gg_timeout() {
         let mut handler = InputHandler::new();
 

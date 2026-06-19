@@ -731,6 +731,50 @@ mod tests {
     }
 
     #[test]
+    fn test_commit_file_diff_root_commit_is_full_addition() {
+        let (temp_dir, repo) = setup_test_repo();
+        // First content-bearing commit on top of the empty initial commit: the
+        // file is brand new, so every line is an addition.
+        let oid = commit_file_bytes(&repo, temp_dir.path(), "a.txt", b"one\ntwo\nthree\n");
+
+        let generator = DiffGenerator::new(&repo);
+        let diff = generator.generate_commit_file_diff(oid, "a.txt").unwrap();
+
+        assert_eq!(diff.file_path, "a.txt");
+        assert!(!diff.binary);
+        assert!(!diff.hunks.is_empty());
+        let lines: Vec<_> = diff.hunks.iter().flat_map(|h| &h.lines).collect();
+        assert_eq!(lines.len(), 3);
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.line_type == crate::diff::LineType::Addition),
+            "every line of a newly added file should be an addition"
+        );
+    }
+
+    #[test]
+    fn test_commit_file_diff_unchanged_path_has_no_hunks() {
+        let (temp_dir, repo) = setup_test_repo();
+        // Commit a.txt, then a later commit that only touches b.txt. Asking for
+        // a.txt's diff in the later commit must yield no hunks (and not panic).
+        commit_file_bytes(&repo, temp_dir.path(), "a.txt", b"unchanged\n");
+        let second = commit_file_bytes(&repo, temp_dir.path(), "b.txt", b"new file\n");
+
+        let generator = DiffGenerator::new(&repo);
+        let diff = generator
+            .generate_commit_file_diff(second, "a.txt")
+            .unwrap();
+
+        assert_eq!(diff.file_path, "a.txt");
+        assert!(!diff.binary);
+        assert!(
+            diff.hunks.is_empty(),
+            "a path unchanged in the commit should produce no hunks"
+        );
+    }
+
+    #[test]
     fn test_file_size_limit() {
         let (temp_dir, repo) = setup_test_repo();
         let file_path = temp_dir.path().join("large.txt");
