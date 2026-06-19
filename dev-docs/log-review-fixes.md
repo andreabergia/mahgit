@@ -29,10 +29,10 @@ separately.
   `max_scroll_offset`. Unit-tested (scroll to bottom, shrink content, offset
   re-clamps).
 
-### 6. Call `ensure_cursor_valid` in the Log render path
-- `src/ui/mod.rs` render: only Status calls `ensure_cursor_valid`. No live bug
-  today (entries only grow), but a safety gap if reload/trim is added later.
-- Fix: call it in the Log render arm.
+### 6. Call `ensure_cursor_valid` in the Log render path — DONE
+- Log render arm now calls `ensure_cursor_valid` before building the view,
+  matching Status. Unit-tested: a render after the log shrinks under the cursor
+  re-clamps the cursor index.
 
 ## P3 — Completeness gaps (Magit parity + codebase consistency)
 

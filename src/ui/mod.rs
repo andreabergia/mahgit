@@ -1093,7 +1093,9 @@ impl App {
                 status_view.render(f, area);
             }
             ViewType::Log => {
-                if let (Some(log_data), Some(log_nav)) = (&self.log_data, &self.log_navigation) {
+                if let (Some(log_data), Some(log_nav)) = (&self.log_data, &mut self.log_navigation)
+                {
+                    log_nav.ensure_cursor_valid(log_data);
                     let log_view = log_view::LogView::new(log_data, log_nav, &self.config);
                     log_view.render(f, area);
                 }
@@ -2616,5 +2618,35 @@ mod tests {
             "G should load more entries, got {}",
             log_data.total_loaded
         );
+    }
+
+    #[test]
+    fn test_log_render_clamps_out_of_range_cursor() {
+        let (repo, temp_dir) = create_test_repo_with_initial_commit("log_render_clamp");
+        create_many_commits(&repo, temp_dir.path(), 4);
+
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+
+        app.open_log_view();
+        // Park the cursor on the last commit.
+        app.handle_command(Command::MoveToBottom);
+
+        // Simulate a reload/trim that shrinks the log under the cursor.
+        let log_data = app.log_data.as_mut().unwrap();
+        log_data.entries.truncate(1);
+        let entry_count = log_data.entries.len();
+
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+
+        match app.log_navigation.as_ref().unwrap().current_cursor() {
+            Some(log_navigation::LogCursor::Commit { index }) => assert!(
+                index < entry_count,
+                "render should clamp cursor index {index} to fewer than {entry_count} entries"
+            ),
+            other => panic!("expected a clamped Commit cursor, got {other:?}"),
+        }
     }
 }
