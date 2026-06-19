@@ -1,6 +1,7 @@
 use crate::config::Config;
-use crate::log::LogData;
+use crate::log::{LogData, LogEntry};
 use crate::repository::CommitChangeType;
+use crate::theme::Theme;
 use crate::ui::diff_renderer::DiffRenderer;
 use crate::ui::log_navigation::{LogCursor, LogNavigationState};
 use ratatui::{
@@ -74,8 +75,12 @@ impl<'a> LogView<'a> {
             let line = self.format_commit_line(entry, is_selected, expand_icon);
             items.push(ListItem::new(line));
 
-            // If commit is expanded, show changed files
+            // If commit is expanded, show metadata block then changed files
             if expanded && let Some(expansion) = self.navigation.get_expansion(commit_idx) {
+                for line in commit_metadata_lines(entry, &self.config.theme) {
+                    items.push(ListItem::new(line));
+                }
+
                 for (file_idx, file_change) in expansion.files.iter().enumerate() {
                     let is_file_selected = matches!(
                         cursor,
@@ -365,6 +370,137 @@ impl<'a> LogView<'a> {
     }
 }
 
+/// Indentation for the metadata block — sits between the commit row (2-space
+/// prefix) and the file rows (4-space prefix).
+const METADATA_INDENT: &str = "      ";
+/// Width the label column is padded to so values line up ("Committer" is widest).
+const METADATA_LABEL_WIDTH: usize = 9;
+
+/// Full commit message split into display lines (trailing blank lines trimmed).
+fn commit_message_lines(message: &str) -> Vec<&str> {
+    message.trim_end().split('\n').collect()
+}
+
+/// Number of list lines the metadata block occupies for a commit. Single source
+/// of truth shared with `commit_metadata_lines` and the flat-index accounting in
+/// `log_navigation`.
+pub fn commit_metadata_line_count(entry: &LogEntry) -> usize {
+    // Commit + Author, optional Committer, a blank separator, then the message.
+    2 + usize::from(entry.has_distinct_committer()) + 1 + commit_message_lines(&entry.message).len()
+}
+
+/// Build the metadata block shown under an expanded commit row.
+pub fn commit_metadata_lines(entry: &LogEntry, theme: &Theme) -> Vec<Line<'static>> {
+    let label_style = Style::default().fg(theme.log_date);
+
+    let labeled = |label: &str, value_spans: Vec<Span<'static>>| -> Line<'static> {
+        let mut spans = vec![Span::styled(
+            // Trailing space guarantees a gap even for the widest label.
+            format!(
+                "{}{:<width$} ",
+                METADATA_INDENT,
+                label,
+                width = METADATA_LABEL_WIDTH
+            ),
+            label_style,
+        )];
+        spans.extend(value_spans);
+        Line::from(spans)
+    };
+
+    let identity_spans = |name: &str, email: &str, time: &git2::Time| -> Vec<Span<'static>> {
+        vec![
+            Span::styled(
+                format!("{} <{}>", name, email),
+                Style::default().fg(theme.log_author),
+            ),
+            Span::styled(
+                format!("  {}", format_absolute_time(time)),
+                Style::default().fg(theme.log_date),
+            ),
+        ]
+    };
+
+    let mut lines = Vec::with_capacity(commit_metadata_line_count(entry));
+
+    lines.push(labeled(
+        "Commit",
+        vec![Span::styled(
+            entry.oid.to_string(),
+            Style::default().fg(theme.log_hash),
+        )],
+    ));
+    lines.push(labeled(
+        "Author",
+        identity_spans(&entry.author_name, &entry.author_email, &entry.time),
+    ));
+    if entry.has_distinct_committer() {
+        lines.push(labeled(
+            "Committer",
+            identity_spans(
+                &entry.committer_name,
+                &entry.committer_email,
+                &entry.committer_time,
+            ),
+        ));
+    }
+
+    lines.push(Line::from(""));
+
+    for msg_line in commit_message_lines(&entry.message) {
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", METADATA_INDENT, msg_line),
+            Style::default().fg(theme.diff_context),
+        )));
+    }
+
+    lines
+}
+
+/// Format a git2 timestamp as `YYYY-MM-DD HH:MM ±HHMM`, applying the commit's
+/// own recorded timezone offset (dependency-free, no `chrono`/`time` crate).
+fn format_absolute_time(time: &git2::Time) -> String {
+    let offset_minutes = time.offset_minutes() as i64;
+    let local = time.seconds() + offset_minutes * 60;
+
+    let days = local.div_euclid(86400);
+    let secs_of_day = local.rem_euclid(86400);
+    let hour = secs_of_day / 3600;
+    let minute = (secs_of_day % 3600) / 60;
+
+    let (year, month, day) = civil_from_days(days);
+
+    let sign = if offset_minutes < 0 { '-' } else { '+' };
+    let off_abs = offset_minutes.abs();
+
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02} {}{:02}{:02}",
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        sign,
+        off_abs / 60,
+        off_abs % 60,
+    )
+}
+
+/// Convert a count of days since the Unix epoch into a `(year, month, day)`
+/// triple (Howard Hinnant's civil-from-days algorithm).
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
 fn format_relative_time(time: &git2::Time) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -433,6 +569,102 @@ fn relative_time(now: i64, commit_time: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::log::LogEntry;
+
+    fn sample_entry() -> LogEntry {
+        LogEntry {
+            oid: git2::Oid::zero(),
+            short_hash: "0000000".to_string(),
+            summary: "summary line".to_string(),
+            message: "summary line\n\nbody line one\nbody line two\n".to_string(),
+            author_name: "Alice".to_string(),
+            author_email: "alice@example.com".to_string(),
+            time: git2::Time::new(1000, 0),
+            committer_name: "Alice".to_string(),
+            committer_email: "alice@example.com".to_string(),
+            committer_time: git2::Time::new(1000, 0),
+        }
+    }
+
+    #[test]
+    fn metadata_line_count_matches_rendered_lines_without_committer() {
+        let entry = sample_entry();
+        let theme = Theme::default();
+        assert!(!entry.has_distinct_committer());
+        assert_eq!(
+            commit_metadata_lines(&entry, &theme).len(),
+            commit_metadata_line_count(&entry)
+        );
+    }
+
+    #[test]
+    fn metadata_line_count_matches_rendered_lines_with_committer() {
+        let mut entry = sample_entry();
+        entry.committer_name = "Bob".to_string();
+        entry.committer_time = git2::Time::new(2000, 0);
+        let theme = Theme::default();
+        assert!(entry.has_distinct_committer());
+        assert_eq!(
+            commit_metadata_lines(&entry, &theme).len(),
+            commit_metadata_line_count(&entry)
+        );
+    }
+
+    #[test]
+    fn metadata_omits_committer_line_when_identical() {
+        let entry = sample_entry();
+        let theme = Theme::default();
+        let text: Vec<String> = commit_metadata_lines(&entry, &theme)
+            .iter()
+            .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert!(text.iter().any(|l: &String| l.contains("Author")));
+        assert!(!text.iter().any(|l: &String| l.contains("Committer")));
+    }
+
+    #[test]
+    fn metadata_includes_committer_line_when_distinct() {
+        let mut entry = sample_entry();
+        entry.committer_name = "Bob".to_string();
+        let theme = Theme::default();
+        let text: Vec<String> = commit_metadata_lines(&entry, &theme)
+            .iter()
+            .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert!(text.iter().any(|l: &String| l.contains("Committer")));
+        assert!(text.iter().any(|l: &String| l.contains("Bob")));
+    }
+
+    #[test]
+    fn format_absolute_time_epoch_utc() {
+        assert_eq!(
+            format_absolute_time(&git2::Time::new(0, 0)),
+            "1970-01-01 00:00 +0000"
+        );
+    }
+
+    #[test]
+    fn format_absolute_time_known_value() {
+        // 2021-01-01 00:00:00 UTC = 1609459200
+        assert_eq!(
+            format_absolute_time(&git2::Time::new(1609459200, 0)),
+            "2021-01-01 00:00 +0000"
+        );
+    }
+
+    #[test]
+    fn format_absolute_time_applies_offset() {
+        // Same instant, +120 minute offset shifts displayed local time to 02:00.
+        assert_eq!(
+            format_absolute_time(&git2::Time::new(1609459200, 120)),
+            "2021-01-01 02:00 +0200"
+        );
+        // Negative offset.
+        assert_eq!(
+            format_absolute_time(&git2::Time::new(1609459200, -300)),
+            "2020-12-31 19:00 -0500"
+        );
+    }
 
     #[test]
     fn test_relative_time_future() {

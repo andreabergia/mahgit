@@ -258,19 +258,28 @@ impl Repository {
                 .map_err(|e| RepositoryError::Other(e.message().to_string()))?;
 
             let author = commit.author();
+            let committer = commit.committer();
             let short_hash = format!("{:.7}", oid);
             let summary = commit.summary().unwrap_or("").to_string();
+            let message = commit.message().unwrap_or("").to_string();
             let author_name = author.name().unwrap_or("Unknown").to_string();
             let author_email = author.email().unwrap_or("").to_string();
             let time = author.when();
+            let committer_name = committer.name().unwrap_or("Unknown").to_string();
+            let committer_email = committer.email().unwrap_or("").to_string();
+            let committer_time = committer.when();
 
             entries.push(crate::log::LogEntry {
                 oid,
                 short_hash,
                 summary,
+                message,
                 author_name,
                 author_email,
                 time,
+                committer_name,
+                committer_email,
+                committer_time,
             });
         }
 

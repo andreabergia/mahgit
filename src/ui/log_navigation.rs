@@ -468,7 +468,7 @@ impl LogNavigationState {
         let cursor = self.cursor?;
         let mut flat_index = 0;
 
-        for (commit_idx, _entry) in log_data.entries.iter().enumerate() {
+        for (commit_idx, entry) in log_data.entries.iter().enumerate() {
             if matches!(cursor, LogCursor::Commit { index } if index == commit_idx) {
                 return Some(flat_index);
             }
@@ -477,6 +477,9 @@ impl LogNavigationState {
             if let Some(expansion) = self.expansions.get(&commit_idx)
                 && expansion.expanded
             {
+                // Metadata block rendered between the commit row and its files.
+                flat_index += crate::ui::log_view::commit_metadata_line_count(entry);
+
                 for (file_idx, _file) in expansion.files.iter().enumerate() {
                     if matches!(cursor, LogCursor::File { commit_index, file_index }
                             if commit_index == commit_idx && file_index == file_idx)
@@ -663,14 +666,20 @@ mod tests {
     #[test]
     fn cursor_flat_index_counts_collapsed_hunk_as_header_only() {
         let mut log_data = LogData::new("main".to_string());
-        log_data.entries.push(LogEntry {
+        let entry = LogEntry {
             oid: git2::Oid::zero(),
             short_hash: "0000000".to_string(),
             summary: "commit".to_string(),
+            message: "commit".to_string(),
             author_name: "Test User".to_string(),
             author_email: "test@example.com".to_string(),
             time: git2::Time::new(0, 0),
-        });
+            committer_name: "Test User".to_string(),
+            committer_email: "test@example.com".to_string(),
+            committer_time: git2::Time::new(0, 0),
+        };
+        let metadata_lines = crate::ui::log_view::commit_metadata_line_count(&entry);
+        log_data.entries.push(entry);
 
         let mut navigation = LogNavigationState::new();
         navigation.set_expansion(
@@ -687,6 +696,11 @@ mod tests {
             hunk_index: 1,
         });
 
-        assert_eq!(navigation.cursor_flat_index(&log_data), Some(4));
+        // commit row (1) + metadata block + file row (1) + collapsed hunk header (1)
+        // + separator (1) for the second hunk header.
+        assert_eq!(
+            navigation.cursor_flat_index(&log_data),
+            Some(4 + metadata_lines)
+        );
     }
 }
