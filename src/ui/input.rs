@@ -453,6 +453,32 @@ impl InputHandler {
             "  Esc     Close help",
         ]
     }
+
+    pub fn get_log_help_text() -> Vec<&'static str> {
+        vec![
+            "Navigation:",
+            "  ↓/j     Move selection down",
+            "  ↑/k     Move selection up",
+            "  PgDn    Page down",
+            "  PgUp/b  Page up",
+            "  Space   Page forward",
+            "  gg/Home Jump to top",
+            "  G/End   Jump to bottom",
+            "  wheel   Scroll viewport",
+            "",
+            "Commits:",
+            "  Tab/→   Expand/collapse the selected commit's diff",
+            "  ←       Collapse / move up hierarchy",
+            "",
+            "Application:",
+            "  q       Exit log view",
+            "  Esc     Exit log view (or close help)",
+            "  C-c     Force quit",
+            "",
+            "Help:",
+            "  ?       Toggle help",
+        ]
+    }
 }
 
 impl Default for InputHandler {
@@ -731,6 +757,36 @@ mod tests {
         assert!(help_text.iter().any(|line| line.contains("?")));
         assert!(help_text.iter().any(|line| line.contains("Toggle help")));
         assert!(help_text.iter().any(|line| line.contains("Close help")));
+    }
+
+    #[test]
+    fn test_log_help_text_content() {
+        let help_text = InputHandler::get_log_help_text();
+        assert!(!help_text.is_empty());
+
+        // Documents how to leave the log view.
+        assert!(
+            help_text
+                .iter()
+                .any(|line| line.contains("q") && line.contains("Exit log"))
+        );
+        assert!(
+            help_text
+                .iter()
+                .any(|line| line.contains("Esc") && line.contains("Exit log"))
+        );
+
+        // Documents log-specific navigation/affordances.
+        assert!(
+            help_text
+                .iter()
+                .any(|line| line.contains("Expand") || line.contains("expand"))
+        );
+
+        // Does not advertise status-only operations that no-op in the log view.
+        assert!(!help_text.iter().any(|line| line.contains("Stage file")));
+        assert!(!help_text.iter().any(|line| line.contains("Unstage file")));
+        assert!(!help_text.iter().any(|line| line.contains("Discard")));
     }
 
     #[test]

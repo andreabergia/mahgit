@@ -36,12 +36,10 @@ separately.
 
 ## P3 — Completeness gaps (Magit parity + codebase consistency)
 
-### 7. View-aware help overlay
-- `src/ui/input.rs` (`get_help_text`) + `src/ui/mod.rs` (`render_help_overlay`):
-  help is a single static status-view list. It never documents the log view and
-  never says how to exit (`q`/`Esc`), while advertising status-only keys that
-  no-op in the log view.
-- Fix: route help text per current view.
+### 7. View-aware help overlay — DONE
+- Added `InputHandler::get_log_help_text` (log-specific keys + how to exit via
+  `q`/`Esc`, no status-only stage/unstage/discard keys); `render_help_overlay`
+  now selects status vs. log help on `current_view`. Unit-tested.
 
 ### 8. Dead keys in the log view
 - `src/ui/mod.rs` (`handle_log_command` `_ => {}` arm): `r` (refresh), `n`/`p`,

@@ -1164,7 +1164,10 @@ impl App {
         };
 
         let area = f.area();
-        let help_text = InputHandler::get_help_text();
+        let help_text = match self.current_view {
+            ViewType::Status => InputHandler::get_help_text(),
+            ViewType::Log => InputHandler::get_log_help_text(),
+        };
 
         // Calculate height needed for help content (plus borders and title)
         let help_height = (help_text.len() as u16)
