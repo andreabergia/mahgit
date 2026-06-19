@@ -53,6 +53,10 @@ separately.
 ### 9. Loading feedback for large synchronous diff loads
 - `toggle_log_expansion` loads diffs from git2 synchronously with no feedback;
   large commits block the UI thread silently. Other ops use `FeedbackManager`.
+- Plan: after the synchronous file-diff load succeeds, show a post-hoc
+  `Loaded diff: <path>` feedback toast (matches the refresh/commit convention
+  of showing a result after the op; a true pre-load indicator would need an
+  async/two-phase refactor, deferred). Unit-tested.
 
 ### Deferred / nice-to-have (not scheduled)
 - Ref/branch/tag decorations on commits.

@@ -1929,7 +1929,7 @@ impl App {
                                 // be swallowed by a toast.
                                 Err(crate::diff::generator::DiffError::BinaryFile(_)) => {
                                     Some(crate::diff::Diff {
-                                        file_path,
+                                        file_path: file_path.clone(),
                                         context: crate::diff::DiffContext::IndexToHead,
                                         hunks: vec![],
                                         binary: true,
@@ -1952,6 +1952,12 @@ impl App {
                             {
                                 expansion.file_diffs.insert(file_index, diff);
                                 expansion.expanded_files.insert(file_index);
+                                self.feedback_manager.show_result(
+                                    crate::operations::OperationResult::new(format!(
+                                        "Loaded diff: {}",
+                                        file_path
+                                    )),
+                                );
                             }
                         }
                     }
@@ -2590,6 +2596,34 @@ mod tests {
             .expect("a diff should be stored for the binary file");
         assert!(diff.binary, "stored diff should be flagged binary");
         assert!(diff.hunks.is_empty(), "binary diff should have no hunks");
+    }
+
+    #[test]
+    fn test_expand_file_in_log_shows_loaded_feedback() {
+        let (repo, temp_dir) = create_test_repo_with_initial_commit("log_diff_feedback");
+        create_test_file(temp_dir.path(), "feature.txt", "hello\nworld\n");
+        repo.add_to_index("feature.txt").unwrap();
+        CommitOperations::new(&repo)
+            .execute_commit("add feature.txt", &Default::default())
+            .unwrap();
+
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+
+        app.open_log_view();
+        app.toggle_log_expansion(); // expand commit -> loads file list
+        app.handle_command(Command::MoveDown); // move to the file
+        app.toggle_log_expansion(); // expand file -> loads diff
+
+        let message = app
+            .feedback_manager
+            .get_current_message()
+            .expect("loading a diff should surface feedback");
+        assert!(
+            message.message.contains("Loaded diff") && message.message.contains("feature.txt"),
+            "diff load feedback should name the file, got: {}",
+            message.message
+        );
     }
 
     #[test]
