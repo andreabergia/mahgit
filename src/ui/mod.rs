@@ -544,6 +544,9 @@ impl App {
                     self.close_log_view();
                 }
             }
+            Command::RefreshStatus => {
+                self.reload_log();
+            }
             Command::Quit => {
                 self.close_log_view();
             }
@@ -1705,6 +1708,42 @@ impl App {
         }
     }
 
+    /// Reload the log view from scratch, re-fetching the currently loaded
+    /// window. Resets navigation and expansion state.
+    fn reload_log(&mut self) {
+        const INITIAL_BATCH: usize = 50;
+        let count = self
+            .log_data
+            .as_ref()
+            .map(|d| d.total_loaded)
+            .unwrap_or(INITIAL_BATCH)
+            .max(INITIAL_BATCH);
+
+        match self.repository.load_log_entries(count, 0) {
+            Ok((entries, has_more)) => {
+                let branch = self.status.branch_name.clone();
+                let mut log_data = crate::log::LogData::new(branch);
+                log_data.total_loaded = entries.len();
+                log_data.has_more = has_more;
+                log_data.entries = entries;
+
+                self.log_navigation = Some(log_navigation::LogNavigationState::new());
+                self.log_data = Some(log_data);
+                self.feedback_manager
+                    .show_result(crate::operations::OperationResult::new(
+                        "Log refreshed".to_string(),
+                    ));
+            }
+            Err(err) => {
+                self.feedback_manager
+                    .show_result(crate::operations::OperationResult::new(format!(
+                        "Failed to reload log: {}",
+                        err
+                    )));
+            }
+        }
+    }
+
     /// Close the log view and return to status
     fn close_log_view(&mut self) {
         self.current_view = ViewType::Status;
@@ -2620,6 +2659,39 @@ mod tests {
             log_data.total_loaded > 50,
             "G should load more entries, got {}",
             log_data.total_loaded
+        );
+    }
+
+    #[test]
+    fn test_reload_log_picks_up_new_commit() {
+        let (repo, temp_dir) = create_test_repo_with_initial_commit("log_reload");
+        create_many_commits(&repo, temp_dir.path(), 3);
+
+        let status = RepositoryStatus::new(&repo).unwrap();
+        let mut app = App::new(repo, status, create_test_config());
+
+        app.open_log_view();
+        let before = app.log_data.as_ref().unwrap().entries.len();
+
+        // Create a new commit while the log view is open.
+        create_test_file(temp_dir.path(), "log.txt", "fresh content\n");
+        app.repository.add_to_index("log.txt").unwrap();
+        CommitOperations::new(&app.repository)
+            .execute_commit("brand new commit", &Default::default())
+            .unwrap();
+
+        // 'r' in the log view should reload and surface the new commit.
+        app.handle_command(Command::RefreshStatus);
+
+        let log_data = app.log_data.as_ref().unwrap();
+        assert_eq!(
+            log_data.entries.len(),
+            before + 1,
+            "reload should pick up the new commit"
+        );
+        assert_eq!(
+            log_data.entries[0].summary, "brand new commit",
+            "newest commit should be at the top after reload"
         );
     }
 

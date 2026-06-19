@@ -41,13 +41,14 @@ separately.
   `q`/`Esc`, no status-only stage/unstage/discard keys); `render_help_overlay`
   now selects status vs. log help on `current_view`. Unit-tested.
 
-### 8. Dead keys in the log view
-- `src/ui/mod.rs` (`handle_log_command` `_ => {}` arm): `r` (refresh), `n`/`p`,
-  `=`/`-`, `w`/`W`, `Enter` are silently ignored.
-- Fix (minimum): implement `r` (reload the log) — a core Magit affordance.
-- Larger: `Enter` to open a commit-detail view (full message body, author/
-  committer, full hash, parents). Currently only `summary` is stored on
-  `LogEntry`.
+### 8. Dead keys in the log view — `r` reload DONE
+- `r` now reloads the log: `handle_log_command` routes `RefreshStatus` to a new
+  `reload_log` that re-fetches the current window from scratch, rebuilds
+  `log_data`, resets navigation, and shows feedback. Integration-tested: a new
+  commit appears after `r`.
+- Remaining dead keys (`n`/`p`, `=`/`-`, `w`/`W`, `Enter`) deferred.
+- Larger (deferred): `Enter` to open a commit-detail view (full message body,
+  author/committer, full hash, parents).
 
 ### 9. Loading feedback for large synchronous diff loads
 - `toggle_log_expansion` loads diffs from git2 synchronously with no feedback;
