@@ -1,0 +1,12 @@
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.31.0"
+ci = "github"
+installers = ["homebrew"]
+publish-jobs = ["homebrew"]
+tap = "andreabergia/homebrew-tap"
+publish-prereleases = false
+targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
+hosting = "github"

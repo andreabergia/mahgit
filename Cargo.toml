@@ -2,6 +2,9 @@
 name = "mahgit"
 version = "0.1.0"
 edition = "2024"
+description = "Terminal Git interface inspired by Magit"
+repository = "https://github.com/andreabergia/mahgit"
+homepage = "https://github.com/andreabergia/mahgit"
 
 [lib]
 name = "mahgit"
@@ -12,7 +15,7 @@ name = "mahgit"
 path = "src/main.rs"
 
 [dependencies]
-git2 = "0.19"
+git2 = { version = "0.19", features = ["vendored-openssl"] }
 crossterm = "0.28"
 ratatui = "0.29"
 thiserror = "1.0"
@@ -26,3 +29,7 @@ walkdir = "2.5"
 [dev-dependencies]
 tempfile = "3.15"
 rexpect = "0.5"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
