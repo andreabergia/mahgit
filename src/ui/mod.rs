@@ -152,13 +152,12 @@ impl App {
         if self.modal_context != ModalContext::None {
             match key_event.code {
                 KeyCode::Esc => self.cancel_modal(),
-                KeyCode::Char(c) if key_event.modifiers == KeyModifiers::NONE => {
-                    // Try to handle the key in the modal
-                    if !self.handle_modal_input(c) {
-                        // Key not handled by modal (e.g., 'n' for cancel)
-                        // Close the modal without executing any command
-                        self.cancel_modal();
-                    }
+                KeyCode::Char(c)
+                    if key_event.modifiers == KeyModifiers::NONE && !self.handle_modal_input(c) =>
+                {
+                    // Key not handled by modal (e.g., 'n' for cancel)
+                    // Close the modal without executing any command
+                    self.cancel_modal();
                 }
                 _ => {} // Ignore other keys in modal mode
             }
@@ -352,12 +351,10 @@ impl App {
                     Event::Key(key) => {
                         self.process_key_event(key);
                     }
-                    Event::Mouse(mouse) => {
-                        // Ignore mouse events when modal is active
-                        if self.modal_context == ModalContext::None {
-                            let command = self.input_handler.handle_mouse(mouse);
-                            self.handle_command(command);
-                        }
+                    // Ignore mouse events when modal is active
+                    Event::Mouse(mouse) if self.modal_context == ModalContext::None => {
+                        let command = self.input_handler.handle_mouse(mouse);
+                        self.handle_command(command);
                     }
                     _ => {}
                 }
