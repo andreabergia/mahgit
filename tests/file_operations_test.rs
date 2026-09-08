@@ -4,7 +4,7 @@ use std::process::Command;
 mod common;
 mod test_backend_utils;
 
-use common::{create_test_file, create_test_repository};
+use common::{change_current_dir, create_test_file, create_test_repository};
 use test_backend_utils::*;
 
 #[test]
@@ -25,7 +25,7 @@ fn test_multi_file_staging_workflow() {
     create_test_file(&test_repo, "README2.md", "# Test Project");
 
     let repository = mahgit::repository::Repository::discover(test_repo.path()).unwrap();
-    std::env::set_current_dir(test_repo.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.path());
 
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
 
@@ -110,7 +110,7 @@ fn test_stage_unstage_single_file() {
     create_test_file(&test_repo, "unstage_test.txt", "test content");
 
     let repository = mahgit::repository::Repository::discover(test_repo.path()).unwrap();
-    std::env::set_current_dir(test_repo.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.path());
 
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
 
@@ -187,7 +187,7 @@ fn test_renamed_file_detection() {
         .expect("Failed to rename file");
 
     let repository = mahgit::repository::Repository::discover(test_repo.path()).unwrap();
-    std::env::set_current_dir(test_repo.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.path());
 
     // Get repository status and verify renamed file is detected
     let status = mahgit::status::RepositoryStatus::new(&repository).expect("Failed to get status");

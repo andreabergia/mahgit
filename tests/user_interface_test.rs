@@ -8,7 +8,7 @@ use tempfile::TempDir;
 mod common;
 mod test_backend_utils;
 
-use common::create_test_repository;
+use common::{change_current_dir, create_test_repository};
 use test_backend_utils::*;
 
 fn create_key_event(ch: char) -> KeyEvent {
@@ -113,17 +113,6 @@ fn test_down_arrow_does_not_wrap_at_end_of_list() {
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repo_path = test_repo.temp_dir.path();
 
-    struct DirGuard(PathBuf);
-
-    impl Drop for DirGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.0);
-        }
-    }
-
-    let original_dir = std::env::current_dir().expect("Failed to read current working directory");
-    let _dir_guard = DirGuard(original_dir);
-
     // Create an unstaged modification and an untracked file
     std::fs::write(
         repo_path.join("README.md"),
@@ -135,7 +124,7 @@ fn test_down_arrow_does_not_wrap_at_end_of_list() {
 
     let repository =
         mahgit::repository::Repository::discover(repo_path).expect("Failed to discover repository");
-    std::env::set_current_dir(repo_path).expect("Failed to change working directory");
+    let _current_dir = change_current_dir(repo_path);
 
     let mut test_app =
         TestApp::with_repository(80, 24, repository).expect("Failed to construct TestApp");
@@ -178,7 +167,7 @@ fn test_refresh_functionality() {
         .temp_dir;
     let repository = mahgit::repository::Repository::discover(test_repo.path()).unwrap();
 
-    std::env::set_current_dir(test_repo.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.path());
 
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
     test_app.render().unwrap();
@@ -217,7 +206,7 @@ fn test_quit_functionality() {
         .temp_dir;
     let repository = mahgit::repository::Repository::discover(test_repo.path()).unwrap();
 
-    std::env::set_current_dir(test_repo.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.path());
 
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
     test_app.render().unwrap();
@@ -288,7 +277,7 @@ fn test_binary_file_error_handling() {
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
 
-    env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.temp_dir.path());
 
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
     test_app.render().unwrap();
@@ -330,7 +319,7 @@ fn test_large_file_error_handling() {
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
 
-    env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.temp_dir.path());
 
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
     test_app.render().unwrap();
@@ -370,7 +359,7 @@ fn test_large_file_error_handling() {
 fn test_inline_hunk_nav_and_stage_advances_selection() {
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repo = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
-    std::env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.temp_dir.path());
 
     // Create a file with two separate hunks
     let path = test_repo.temp_dir.path().join("multi_hunk.txt");
@@ -422,7 +411,7 @@ fn test_normal_file_diff_works() {
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
 
-    env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.temp_dir.path());
 
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
     test_app.render().unwrap();
@@ -464,7 +453,7 @@ fn test_mouse_scroll_navigation() {
     let repository = test_repo.repository;
 
     // Set current directory to the test repository
-    std::env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.temp_dir.path());
 
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
 
@@ -504,7 +493,7 @@ fn test_mouse_unsupported_events_ignored() {
     let repository = test_repo.repository;
 
     // Set current directory to the test repository
-    std::env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.temp_dir.path());
 
     let mut test_app = TestApp::with_repository(80, 24, repository).unwrap();
 
@@ -549,7 +538,7 @@ fn test_section_collapse_expand() {
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
 
-    env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.temp_dir.path());
 
     // Create files in different sections to test section collapsing
     // 1. Create an unstaged file
@@ -783,7 +772,7 @@ fn test_inline_diff_expansion_and_content() {
     let test_repo = create_test_repository().expect("Failed to create test repository");
     let repository = mahgit::repository::Repository::discover(test_repo.temp_dir.path()).unwrap();
 
-    env::set_current_dir(test_repo.temp_dir.path()).unwrap();
+    let _current_dir = change_current_dir(test_repo.temp_dir.path());
 
     // Create a file with specific content that we can verify
     let test_file = "test_modified.txt";
